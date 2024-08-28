@@ -44,18 +44,26 @@ def act(self, game_state: dict) -> str:
     if state not in self.q_table:
         self.q_table[state] = np.zeros(len(ACTIONS))
     
-    valid_actions = get_valid_actions(game_state)
-
+    # Alle Aktionen überprüfen
+    q_values = self.q_table[state]
+    valid_actions = []
+    
+    for action in ACTIONS:
+        if action == 'BOMB':
+            if is_safe_position(game_state, game_state['self'][3], get_bomb_timers(game_state)):
+                valid_actions.append(action)
+        else:
+            valid_actions.append(action)
+    
     if np.random.rand() < self.epsilon:
-        # Epsilon-greedy: Zufällige Aktion auswählen, um Exploration zu fördern
         action = np.random.choice(valid_actions)
     else:
         self.logger.debug("Querying Q-table for action.")
-        q_values = self.q_table[state]
         valid_q_values = [q_values[ACTIONS.index(action)] for action in valid_actions]
         action = valid_actions[np.argmax(valid_q_values)]
     
     return action
+
 
 def get_valid_actions(game_state):
     x, y = game_state['self'][3]
@@ -112,17 +120,32 @@ def is_safe_to_place_bomb(game_state, position=None):
     return False
 
 
-def is_safe_position(position, game_state):
-    """Überprüft, ob eine Position sicher vor einer Explosion ist."""
-    bombs = game_state['bombs']
+def is_safe_position(game_state, position, bomb_timers):
+    """
+    Check if a position is safe considering the bombs' timers and their blast radius.
+    
+    :param game_state: The current game state dictionary.
+    :param position: The (x, y) tuple of the position to check.
+    :param bomb_timers: A list of (position, timer) tuples for each bomb.
+    :return: True if the position is safe, False otherwise.
+    """
     field = game_state['field']
     x, y = position
 
-    for bomb_pos, _ in bombs:
+    for bomb_pos, timer in bomb_timers:
         bx, by = bomb_pos
-        if (bx == x and abs(by - y) <= 3) or (by == y and abs(bx - x) <= 3):
+
+        if timer <= 0:
+            continue
+
+        # Check horizontal and vertical lines for blast danger
+        if bx == x and abs(by - y) <= 2 and timer <= 4:  # Same column and within blast range
             return False
+        if by == y and abs(bx - x) <= 2 and timer <= 4:  # Same row and within blast range
+            return False
+
     return True
+
 
 def state_to_features(game_state: dict) -> np.array:
     if game_state is None:
@@ -196,3 +219,13 @@ def find_crates(game_state):
             if field[x, y] == 1:  # 1 steht normalerweise für eine Kiste
                 crates.append((x, y))
     return crates
+
+def get_bomb_timers(game_state):
+    """
+    Get the positions and timers of all bombs on the field.
+    
+    :param game_state: The current game state dictionary.
+    :return: A list of (position, timer) tuples for each bomb.
+    """
+    bombs = game_state['bombs']  # List of tuples with ((x, y), timer)
+    return [(bomb[0], bomb[1]) for bomb in bombs]

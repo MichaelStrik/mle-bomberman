@@ -2,6 +2,7 @@ import pickle
 import os
 import numpy as np
 from .callbacks import state_to_features
+from .callbacks import is_safe_position
 import events as e
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
@@ -65,12 +66,26 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Belohnung für keinen selbstmord
     if self_action == 'BOMB' and is_safe_to_place_bomb(old_game_state, old_game_state['self'][3]):
         events.append("SAFE_BOMB_PLACEMENT")
+
+    # Bestrafung für risiko bomben legen
+    elif self_action == 'BOMB' and not is_safe_to_place_bomb(old_game_state, old_game_state['self'][3]):
+        events.append("UNSAFE_BOMB_PLACEMENT")
     
+    if not has_made_progress(old_game_state, new_game_state):
+        events.append("NO_PROGRESS")
+
     # Bewegung erkennen und mögliche Schleifen vermeiden
     current_position = new_game_state['self'][3]
     if len(self.last_positions) >= 3 and current_position in self.last_positions[-2:]:
         events.append("STUCK_IN_LOOP")
 
+    # Bomben-Timer und Sicherheitsüberprüfung integrieren
+    bomb_timers = get_bomb_timers(new_game_state)
+    current_position = new_game_state['self'][3]
+
+    if not is_safe_position(new_game_state, current_position, bomb_timers):
+        events.append("MOVED_INTO_DANGER")
+        
     # Position und Aktion speichern
     self.last_positions.append(current_position)
     self.last_actions.append(self_action)
@@ -140,21 +155,24 @@ def reward_from_events(self, events: list[str], old_game_state: dict, new_game_s
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 5,
-        e.KILLED_OPPONENT: 10,
+        e.COIN_COLLECTED: 5.0,
+        e.KILLED_OPPONENT: 10.0,
         e.MOVED_UP: -0.05,
         e.MOVED_DOWN: -0.05,
         e.MOVED_LEFT: -0.05,
         e.MOVED_RIGHT: -0.05,
         e.WAITED: -0.1,
-        e.INVALID_ACTION: -1,
-        e.GOT_KILLED: -5,
-        e.KILLED_SELF: -50,
-        "STUCK_IN_LOOP": -5,
-        "BOMB_PLACED_NEAR_BOXES": 2,
-        "BOX_DESTROYED": 4,
-        "ESCAPED_BOMB": 3,
-        "SAFE_BOMB_PLACEMENT": 5,
+        e.INVALID_ACTION: -1.0,
+        e.GOT_KILLED: -5.0,
+        e.KILLED_SELF: -50.0,
+        #"STUCK_IN_LOOP": -5.0,
+        "BOMB_PLACED_NEAR_BOXES": 2.0,
+        "BOX_DESTROYED": 4.0,
+        "ESCAPED_BOMB": 3.0,
+        "SAFE_BOMB_PLACEMENT": 5.0,
+        "UNSAFE_BOMB_PLACEMENT": -5.0, 
+        "NO_PROGRESS": -1.0, 
+        "MOVED_INTO_DANGER": -10.0 
     }
 
     reward_sum = sum([game_rewards.get(event, 0) for event in events])
@@ -170,6 +188,9 @@ def reward_from_events(self, events: list[str], old_game_state: dict, new_game_s
             new_min_dist = min([np.linalg.norm(np.array(new_position) - np.array(box)) for box in np.argwhere(new_game_state['field'] == 1)])
             if new_min_dist < old_min_dist:
                 reward_sum += 0.5
+            else:
+                reward_sum -= 0.5
+
 
         # Flucht aus der Bombenreichweite belohnen
         old_bomb_distances = [np.linalg.norm(np.array(old_position) - np.array(bomb[0])) for bomb in old_game_state['bombs']]
@@ -177,7 +198,9 @@ def reward_from_events(self, events: list[str], old_game_state: dict, new_game_s
 
         if old_bomb_distances and new_bomb_distances:  # Überprüfen, ob beide Listen nicht leer sind
             if min(new_bomb_distances) > min(old_bomb_distances):
-                reward_sum += 1  # Belohnung für das Entkommen aus der Bombenreichweite
+                reward_sum += 1.0  # Belohnung für das Entkommen aus der Bombenreichweite
+            else:
+                reward_sum -= 1.0
 
     if "BOMB_PLACED_NEAR_BOXES" in events and "ESCAPED_BOMB" in events:
         reward_sum += game_rewards["SAFE_BOMB_PLACEMENT"]
@@ -222,3 +245,54 @@ def get_safe_positions_after_bomb(game_state, bomb_position):
                 safe_positions.append((nx, ny))
 
     return safe_positions
+
+def has_made_progress(old_game_state, new_game_state):
+    """Überprüft, ob der Agent Fortschritt macht (z.B. sich einer Münze, Kiste oder einem anderen Ziel nähert)."""
+    if old_game_state is None or new_game_state is None:
+        return True 
+
+    old_position = np.array(old_game_state['self'][3])
+    new_position = np.array(new_game_state['self'][3])
+
+    # Münzenfortschritt überprüfen
+    old_coin_distances = [np.linalg.norm(old_position - np.array(coin)) for coin in old_game_state['coins']]
+    new_coin_distances = [np.linalg.norm(new_position - np.array(coin)) for coin in new_game_state['coins']]
+
+    if min(new_coin_distances, default=float('inf')) < min(old_coin_distances, default=float('inf')):
+        return True  # näher an eine Münze
+
+    # Fortschritt beim Annähern an Kisten überprüfen
+    old_box_positions = np.argwhere(old_game_state['field'] == 1)  # Kisten sind durch 1 im Feld markiert
+    new_box_positions = np.argwhere(new_game_state['field'] == 1)
+
+    if old_box_positions.size > 0 and new_box_positions.size > 0:
+        old_box_distances = [np.linalg.norm(old_position - box) for box in old_box_positions]
+        new_box_distances = [np.linalg.norm(new_position - box) for box in new_box_positions]
+
+        if min(new_box_distances, default=float('inf')) < min(old_box_distances, default=float('inf')):
+            return True  # näher an eine Kiste
+
+    # Fortschritt beim Entfernen von Bomben überprüfen
+    old_bomb_distances = [np.linalg.norm(old_position - np.array(bomb[0])) for bomb in old_game_state['bombs']]
+    new_bomb_distances = [np.linalg.norm(new_position - np.array(bomb[0])) for bomb in new_game_state['bombs']]
+
+    if old_bomb_distances and new_bomb_distances:
+        if min(new_bomb_distances) > min(old_bomb_distances):
+            return True  # sich weiter von Bomben entfernt
+
+    # Fortschritt beim Annähern an Gegner überprüfen
+    old_enemy_positions = [enemy[3] for enemy in old_game_state['others']]
+    new_enemy_positions = [enemy[3] for enemy in new_game_state['others']]
+
+    if old_enemy_positions and new_enemy_positions:
+        old_enemy_distances = [np.linalg.norm(old_position - np.array(enemy)) for enemy in old_enemy_positions]
+        new_enemy_distances = [np.linalg.norm(new_position - np.array(enemy)) for enemy in new_enemy_positions]
+
+        if min(new_enemy_distances, default=float('inf')) < min(old_enemy_distances, default=float('inf')):
+            return True  # näher an einen Gegner
+
+    return False  # Keinen Fortschritt gemacht
+
+def get_bomb_timers(game_state):
+    bombs = game_state['bombs']
+    return [(bomb[0], bomb[1]) for bomb in bombs]
