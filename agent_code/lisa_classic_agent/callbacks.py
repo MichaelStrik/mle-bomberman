@@ -31,11 +31,11 @@ def setup(self):
         self.q_table = {}
         self.logger.info("No saved model found. Starting with an empty Q-table.")
     
-    self.alpha = 0.5
+    self.alpha = 0.1
     self.gamma = 0.9
-    self.epsilon = 0.5
+    self.epsilon = 0.1
     self.epsilon_decay = 0.995
-    self.epsilon_min = 0.1
+    self.epsilon_min = 0.01
 
 def act(self, game_state: dict) -> str:
     features = state_to_features(game_state)

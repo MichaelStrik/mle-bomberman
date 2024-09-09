@@ -12,8 +12,8 @@ def setup_training(self):
     self.q_table = {}
     self.alpha = 0.1  # Lernrate
     self.gamma = 0.9  # Diskontfaktor
-    self.epsilon = 1.0  # Epsilon für epsilon-greedy
-    self.epsilon_decay = 0.99  # Epsilon-Decay
+    self.epsilon = 0.97  # Epsilon für epsilon-greedy
+    self.epsilon_decay = 0.995  # Epsilon-Decay
     self.epsilon_min = 0.1
     self.last_positions = []
     self.last_actions = []
@@ -27,16 +27,22 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     
     old_state = state_to_features(old_game_state)
     new_state = state_to_features(new_game_state)
-    
+
     old_state = tuple(old_state)
     new_state = tuple(new_state)
 
-    if old_state not in self.q_table:
-        self.q_table[old_state] = np.zeros(len(ACTIONS))
-    
-    if new_state not in self.q_table:
-        self.q_table[new_state] = np.zeros(len(ACTIONS))
+    # Symmetrische Zustände für den alten und neuen Zustand berechnen
+    symmetric_old_states = get_symmetric_states(old_state)
+    symmetric_new_states = get_symmetric_states(new_state)
 
+    # Q-Werte für symmetrische Zustände initialisieren, falls sie noch nicht existieren
+    for state in symmetric_old_states:
+        if state not in self.q_table:
+            self.q_table[state] = np.zeros(len(ACTIONS))
+    for state in symmetric_new_states:
+        if state not in self.q_table:
+            self.q_table[state] = np.zeros(len(ACTIONS))
+    
     action_idx = ACTIONS.index(self_action)
     
     # Bewegung erkennen
@@ -89,11 +95,32 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # SARSA Update-Regel
     if new_game_state is not None:
         next_action = np.argmax(self.q_table[new_state])
-        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                              self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
+        for idx, (old_sym_state, new_sym_state) in enumerate(zip(symmetric_old_states, symmetric_new_states)):
+            old_q_value = self.q_table[old_sym_state][action_idx]
+            new_q_value = old_q_value + self.alpha * (reward + self.gamma * self.q_table[new_sym_state][next_action] - old_q_value)
+            
+            # Q-Tabelle aktualisieren
+            self.q_table[old_sym_state][action_idx] = new_q_value
+
+            # Log der Q-Tabellen-Einträge
+            if idx == 0:
+                self.logger.info(f"Updated Q-value for ORIGINAL state {old_sym_state}: {self.q_table[old_sym_state]}")
+            else:
+                self.logger.info(f"Updated Q-value for symmetric state {old_sym_state}: {self.q_table[old_sym_state]}")
     else:
-        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                              self.alpha * (reward - self.q_table[old_state][action_idx])
+        # Terminalzustand
+        for idx, old_sym_state in enumerate(symmetric_old_states):
+            old_q_value = self.q_table[old_sym_state][action_idx]
+            new_q_value = old_q_value + self.alpha * (reward - old_q_value)
+
+            # Q-Tabelle aktualisieren
+            self.q_table[old_sym_state][action_idx] = new_q_value
+
+            # Log der Q-Tabellen-Einträge für Terminalzustand
+            if idx == 0:
+                self.logger.info(f"Updated Q-value (Terminal) for ORIGINAL state {old_sym_state}: {self.q_table[old_sym_state]}")
+            else:
+                self.logger.info(f"Updated Q-value (Terminal) for symmetric state {old_sym_state}: {self.q_table[old_sym_state]}")
 
     # Epsilon-Decay
     if self.epsilon > self.epsilon_min:
@@ -136,18 +163,18 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: list[str
 
 def reward_from_events(self, events: list[str], old_game_state: dict, new_game_state: dict, self_action: str) -> int:
     game_rewards = {
-        e.COIN_COLLECTED: 50,
+        e.COIN_COLLECTED: 200,
         e.KILLED_OPPONENT: 10,
         e.MOVED_UP: -0.1,
         e.MOVED_DOWN: -0.1,
         e.MOVED_LEFT: -0.1,
         e.MOVED_RIGHT: -0.1,
-        e.WAITED: -0.2,
+        e.WAITED: -0.7,
         e.BOMB_DROPPED: - 5, 
         e.INVALID_ACTION: -1,
-        e.GOT_KILLED: -20,
-        e.KILLED_SELF: -50,
-        "STUCK_IN_LOOP": -8,
+        e.GOT_KILLED: -200,
+        e.KILLED_SELF: -300,
+        "STUCK_IN_LOOP": -10,
         "BOMB_PLACED_NEAR_BOXES": 1,
         "ESCAPED_BOMB": 1,
         "ENTERED_DANGER": -4,
@@ -174,7 +201,7 @@ def reward_from_events(self, events: list[str], old_game_state: dict, new_game_s
                 new_min_dist = float('inf')  # Standardwert, wenn keine Münzen vorhanden sind
 
             if new_min_dist < old_min_dist:
-                reward_sum += 1
+                reward_sum += 10
             else:
                 reward_sum -= 0.5  # Bestrafung für sich von Münzen entfernen
         
@@ -193,3 +220,26 @@ def reward_from_events(self, events: list[str], old_game_state: dict, new_game_s
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
 
+def rotate_state(state, rotation):
+    """Rotiert den Zustand um 90, 180 oder 270 Grad"""
+    dx, dy, *other_features = state
+    if rotation == 90:
+        return (-dy, dx, *other_features)
+    elif rotation == 180:
+        return (-dx, -dy, *other_features)
+    elif rotation == 270:
+        return (dy, -dx, *other_features)
+    return state
+
+def mirror_state(state):
+    """Spiegelt den Zustand entlang der Y-Achse"""
+    dx, dy, *other_features = state
+    return (-dx, dy, *other_features)
+
+def get_symmetric_states(state):
+    """Gibt alle symmetrischen Zustände zurück"""
+    states = [state]
+    for rotation in [90, 180, 270]:
+        states.append(rotate_state(state, rotation))
+    states.append(mirror_state(state))
+    return states

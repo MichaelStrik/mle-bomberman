@@ -17,7 +17,7 @@ def setup_training(self):
     self.logger.info("Setting up training variables.")
     # Q-table initialisieren
     self.q_table = {}
-    self.alpha = 0.3  # Lernrate davor 0.1
+    self.alpha = 0.2  # Lernrate davor 0.1
     self.gamma = 0.95  # Diskontfaktor um so höher um so stätrker werden zufällige gewinne belohnt
     self.epsilon = 1.0  # Epsilon für epsilon-greedy 
     self.epsilon_decay = 0.995  # Epsilon-Decay für Exploration-Exploitation Tradeoff
@@ -56,6 +56,18 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     
     if new_state not in self.q_table:
         self.q_table[new_state] = np.zeros(len(ACTIONS))
+
+    # Symmetrische Zustände für den alten und neuen Zustand berechnen
+    symmetric_old_states = get_symmetric_states(old_state)
+    symmetric_new_states = get_symmetric_states(new_state)
+
+    # Q-Werte für symmetrische Zustände initialisieren, falls sie noch nicht existieren
+    for state in symmetric_old_states:
+        if state not in self.q_table:
+            self.q_table[state] = np.zeros(len(ACTIONS))
+    for state in symmetric_new_states:
+        if state not in self.q_table:
+            self.q_table[state] = np.zeros(len(ACTIONS))
 
     action_idx = ACTIONS.index(self_action)
     
@@ -101,11 +113,32 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # SARSA Update-Regel
     if new_game_state is not None:
         next_action = np.argmax(self.q_table[new_state])
-        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                              self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
+        for idx, (old_sym_state, new_sym_state) in enumerate(zip(symmetric_old_states, symmetric_new_states)):
+            old_q_value = self.q_table[old_sym_state][action_idx]
+            new_q_value = old_q_value + self.alpha * (reward + self.gamma * self.q_table[new_sym_state][next_action] - old_q_value)
+            
+            # Q-Tabelle aktualisieren
+            self.q_table[old_sym_state][action_idx] = new_q_value
+
+            # Log der Q-Tabellen-Einträge
+            if idx == 0:
+                self.logger.info(f"Updated Q-value for ORIGINAL state {old_sym_state}: {self.q_table[old_sym_state]}")
+            else:
+                self.logger.info(f"Updated Q-value for symmetric state {old_sym_state}: {self.q_table[old_sym_state]}")
     else:
-        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                              self.alpha * (reward - self.q_table[old_state][action_idx])
+        # Terminalzustand
+        for idx, old_sym_state in enumerate(symmetric_old_states):
+            old_q_value = self.q_table[old_sym_state][action_idx]
+            new_q_value = old_q_value + self.alpha * (reward - old_q_value)
+
+            # Q-Tabelle aktualisieren
+            self.q_table[old_sym_state][action_idx] = new_q_value
+
+            # Log der Q-Tabellen-Einträge für Terminalzustand
+            if idx == 0:
+                self.logger.info(f"Updated Q-value (Terminal) for ORIGINAL state {old_sym_state}: {self.q_table[old_sym_state]}")
+            else:
+                self.logger.info(f"Updated Q-value (Terminal) for symmetric state {old_sym_state}: {self.q_table[old_sym_state]}")
 
     # Epsilon-Decay
     if self.epsilon > self.epsilon_min:
@@ -296,3 +329,29 @@ def has_made_progress(old_game_state, new_game_state):
 def get_bomb_timers(game_state):
     bombs = game_state['bombs']
     return [(bomb[0], bomb[1]) for bomb in bombs]
+
+
+
+def rotate_state(state, rotation):
+    """Rotiert den Zustand um 90, 180 oder 270 Grad"""
+    dx, dy, *other_features = state
+    if rotation == 90:
+        return (-dy, dx, *other_features)
+    elif rotation == 180:
+        return (-dx, -dy, *other_features)
+    elif rotation == 270:
+        return (dy, -dx, *other_features)
+    return state
+
+def mirror_state(state):
+    """Spiegelt den Zustand entlang der Y-Achse"""
+    dx, dy, *other_features = state
+    return (-dx, dy, *other_features)
+
+def get_symmetric_states(state):
+    """Gibt alle symmetrischen Zustände zurück"""
+    states = [state]
+    for rotation in [90, 180, 270]:
+        states.append(rotate_state(state, rotation))
+    states.append(mirror_state(state))
+    return states

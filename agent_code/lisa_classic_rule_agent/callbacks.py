@@ -19,9 +19,9 @@ def setup(self):
     
     self.alpha = 0.1
     self.gamma = 0.9
-    self.epsilon = 1.0
-    self.epsilon_decay = 0.99
-    self.epsilon_min = 0.1
+    self.epsilon = 0.1
+    self.epsilon_decay = 0.995
+    self.epsilon_min = 0.0
     self.bomb_history = deque([], 5)
     self.coordinate_history = deque([], 20)
     self.ignore_others_timer = 0
