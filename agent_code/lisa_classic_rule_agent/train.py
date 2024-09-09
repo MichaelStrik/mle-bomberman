@@ -355,7 +355,24 @@ def get_symmetric_states_and_actions(state, action):
     #print(f"Total unique states_actions: {len(states_actions)}")
     return list(states_actions)
 
+def bfs(field, start, target):
+    queue = deque([(start, 0)])
+    visited = set()
+    visited.add(start)
 
+    while queue:
+        (x, y), dist = queue.popleft()
+        if (x, y) == target:
+            return dist
+
+        for dx, dy in [(-1, 0), (1, 0), (0, 1), (0, -1)]:
+            nx, ny = x + dx, y + dy
+            if (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]
+                    and field[nx, ny] == 0 and (nx, ny) not in visited):
+                queue.append(((nx, ny), dist + 1))
+                visited.add((nx, ny))
+    
+    return float('inf')
 
 
 
