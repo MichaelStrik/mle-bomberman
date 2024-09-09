@@ -31,17 +31,17 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     old_state = tuple(old_state)
     new_state = tuple(new_state)
 
-    # Symmetrische Zustände für den alten und neuen Zustand berechnen
-    symmetric_old_states = get_symmetric_states(old_state)
-    symmetric_new_states = get_symmetric_states(new_state)
+    # Symmetrische Zustände und zugehörige Aktionen berechnen
+    symmetric_old_states_actions = get_symmetric_states_and_actions(old_state, self_action)
+    symmetric_new_states_actions = get_symmetric_states_and_actions(new_state, self_action)
 
     # Q-Werte für symmetrische Zustände initialisieren, falls sie noch nicht existieren
-    for state in symmetric_old_states:
-        if state not in self.q_table:
-            self.q_table[state] = np.zeros(len(ACTIONS))
-    for state in symmetric_new_states:
-        if state not in self.q_table:
-            self.q_table[state] = np.zeros(len(ACTIONS))
+    for sym_state, sym_action in symmetric_old_states_actions:
+        if sym_state not in self.q_table:
+            self.q_table[sym_state] = np.zeros(len(ACTIONS))
+    for sym_state, sym_action in symmetric_new_states_actions:
+        if sym_state not in self.q_table:
+            self.q_table[sym_state] = np.zeros(len(ACTIONS))
     
     action_idx = ACTIONS.index(self_action)
     
@@ -78,7 +78,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Schritte zählen
     self.steps_survived += 1
     
-    
     # Bestrafung für unnötiges Bombenlegen
     if self_action == 'BOMB':
         x, y = old_game_state['self'][3]
@@ -95,7 +94,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # SARSA Update-Regel
     if new_game_state is not None:
         next_action = np.argmax(self.q_table[new_state])
-        for idx, (old_sym_state, new_sym_state) in enumerate(zip(symmetric_old_states, symmetric_new_states)):
+        for idx, ((old_sym_state, sym_action), (new_sym_state, _)) in enumerate(zip(symmetric_old_states_actions, symmetric_new_states_actions)):
             old_q_value = self.q_table[old_sym_state][action_idx]
             new_q_value = old_q_value + self.alpha * (reward + self.gamma * self.q_table[new_sym_state][next_action] - old_q_value)
             
@@ -109,7 +108,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                 self.logger.info(f"Updated Q-value for symmetric state {old_sym_state}: {self.q_table[old_sym_state]}")
     else:
         # Terminalzustand
-        for idx, old_sym_state in enumerate(symmetric_old_states):
+        for idx, (old_sym_state, sym_action) in enumerate(symmetric_old_states_actions):
             old_q_value = self.q_table[old_sym_state][action_idx]
             new_q_value = old_q_value + self.alpha * (reward - old_q_value)
 
@@ -220,6 +219,7 @@ def reward_from_events(self, events: list[str], old_game_state: dict, new_game_s
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
 
+
 def rotate_state(state, rotation):
     """Rotiert den Zustand um 90, 180 oder 270 Grad"""
     dx, dy, *other_features = state
@@ -231,15 +231,134 @@ def rotate_state(state, rotation):
         return (dy, -dx, *other_features)
     return state
 
-def mirror_state(state):
-    """Spiegelt den Zustand entlang der Y-Achse"""
+def mirror_state(state, axis='y'):
+    """Spiegelt den Zustand entlang der angegebenen Achse ('x' oder 'y')"""
     dx, dy, *other_features = state
-    return (-dx, dy, *other_features)
+    if axis == 'x':
+        return (-dx, dy, *other_features)
+    elif axis == 'y':
+        return (dx, -dy, *other_features)
+    return state
 
-def get_symmetric_states(state):
-    """Gibt alle symmetrischen Zustände zurück"""
-    states = [state]
-    for rotation in [90, 180, 270]:
-        states.append(rotate_state(state, rotation))
-    states.append(mirror_state(state))
-    return states
+def mirror_diagonal(state, diagonal='main'):
+    dx, dy, *other_features = state
+    if diagonal == 'main':
+        return (dy, dx, *other_features)
+    elif diagonal == 'secondary':
+        return (-dy, -dx, *other_features)
+    return state
+
+def rotate_action(action, rotation):
+    """Passt die Aktion ('UP', 'DOWN', 'LEFT', 'RIGHT') basierend auf der Rotation an."""
+    action_map = {
+        'UP': {90: 'RIGHT', 180: 'DOWN', 270: 'LEFT', 0: 'UP'},
+        'RIGHT': {90: 'DOWN', 180: 'LEFT', 270: 'UP', 0: 'RIGHT'},
+        'DOWN': {90: 'LEFT', 180: 'UP', 270: 'RIGHT', 0: 'DOWN'},
+        'LEFT': {90: 'UP', 180: 'RIGHT', 270: 'DOWN', 0: 'LEFT'}
+    }
+    return action_map[action][rotation]
+
+
+def mirror_action(action, axis):
+    """Passt die Aktion ('UP', 'DOWN', 'LEFT', 'RIGHT') basierend auf der Spiegelung an."""
+    if axis == 'x':  # Spiegelung an der x-Achse
+        return {'UP': 'DOWN', 'DOWN': 'UP', 'LEFT': 'LEFT', 'RIGHT': 'RIGHT'}[action]
+    elif axis == 'y':  # Spiegelung an der y-Achse
+        return {'UP': 'UP', 'DOWN': 'DOWN', 'LEFT': 'RIGHT', 'RIGHT': 'LEFT'}[action]
+    return action
+
+def transform_action(action, rotation=None, axis=None, diagonal=None):
+    """Transformiere die Aktion basierend auf Rotation, Spiegelung oder Diagonalspiegelung."""
+    if action in ['BOMB', 'WAIT']:
+        return action
+
+    action_map = {
+        'UP': 0, 'RIGHT': 1, 'DOWN': 2, 'LEFT': 3
+    }
+    reverse_action_map = {v: k for k, v in action_map.items()}
+    action_idx = action_map[action]
+
+    if rotation:
+        action_idx = (action_idx + rotation // 90) % 4
+    
+    if axis == 'x':
+        if action == 'UP':
+            action_idx = action_map['DOWN']
+        elif action == 'DOWN':
+            action_idx = action_map['UP']
+    elif axis == 'y':
+        if action == 'LEFT':
+            action_idx = action_map['RIGHT']
+        elif action == 'RIGHT':
+            action_idx = action_map['LEFT']
+
+    if diagonal == 'main':
+        if action == 'UP':
+            action_idx = action_map['RIGHT']
+        elif action == 'RIGHT':
+            action_idx = action_map['UP']
+        elif action == 'DOWN':
+            action_idx = action_map['LEFT']
+        elif action == 'LEFT':
+            action_idx = action_map['DOWN']
+    elif diagonal == 'secondary':
+        if action == 'UP':
+            action_idx = action_map['LEFT']
+        elif action == 'RIGHT':
+            action_idx = action_map['DOWN']
+        elif action == 'DOWN':
+            action_idx = action_map['RIGHT']
+        elif action == 'LEFT':
+            action_idx = action_map['UP']
+
+    return reverse_action_map[action_idx]
+
+def get_symmetric_states_and_actions(state, action):
+    """Gibt alle symmetrischen Zustände und die dazugehörigen symmetrischen Aktionen zurück."""
+    states_actions = set()
+    
+    # Original Zustand und Aktion
+    states_actions.add((state, action))
+    
+    # Rotationen um 90, 180 und 270 Grad
+    for rotation in [0, 90, 180, 270]:
+        rotated_state = rotate_state(state, rotation)
+        rotated_action = transform_action(action, rotation)
+        states_actions.add((rotated_state, rotated_action))
+    
+    # Spiegelungen entlang der x- und y-Achse
+    for axis in ['x', 'y']:
+        mirrored_state = mirror_state(state, axis)
+        mirrored_action = transform_action(action, axis=axis)
+        states_actions.add((mirrored_state, mirrored_action))
+        
+        # Spiegelungen nach jeder Rotation
+        for rotation in [0, 90, 180, 270]:
+            rotated_state = rotate_state(state, rotation)
+            rotated_mirrored_state = mirror_state(rotated_state, axis)
+            rotated_mirrored_action = transform_action(action, rotation, axis=axis)
+            states_actions.add((rotated_mirrored_state, rotated_mirrored_action))
+    
+    # Diagonalspiegelungen
+    for diagonal in ['main', 'secondary']:
+        diagonal_state = mirror_diagonal(state, diagonal)
+        diagonal_action = transform_action(action, diagonal=diagonal)
+        states_actions.add((diagonal_state, diagonal_action))
+        
+        for rotation in [0, 90, 180, 270]:
+            rotated_state = rotate_state(state, rotation)
+            
+            rotated_diagonal_state = mirror_diagonal(rotated_state, diagonal)
+            rotated_diagonal_action = transform_action(action, rotation, diagonal=diagonal)
+            states_actions.add((rotated_diagonal_state, rotated_diagonal_action))
+
+    #print(f"Total unique states_actions: {len(states_actions)}")
+    return list(states_actions)
+
+
+
+
+
+
+
+
