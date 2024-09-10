@@ -19,8 +19,8 @@ def setup(self):
     
     self.alpha = 0.1
     self.gamma = 0.9
-    self.epsilon = 0.1
-    self.epsilon_decay = 0.995
+    self.epsilon = 0.15
+    self.epsilon_decay = 0.999
     self.epsilon_min = 0.0
     self.bomb_history = deque([], 5)
     self.coordinate_history = deque([], 20)
@@ -118,12 +118,20 @@ def get_valid_actions(game_state):
                 and field[nx, ny] == 0 and explosion_map[nx, ny] == 0):  # Feld ist frei und sicher
             valid_actions.append(action)
     
+
+    def is_in_corner(x, y, field):
+        max_x, max_y = field.shape[0] - 1, field.shape[1] - 1
+        return (x == 0 or x == max_x) and (y == 0 or y == max_y)
+
+    # Überprüfe, ob BOMB eine gültige Aktion ist (z.B. keine Bombe direkt daneben)
+    if (game_state['self'][2]  # Spieler kann Bombe legen
+            and all(np.linalg.norm(np.array(bomb[:2]) - np.array((x, y))) > 1 for bomb in bombs)  # Keine Bombe zu nah
+            and not is_in_corner(x, y, field)):  # Spieler ist nicht in der Ecke
+        
+        valid_actions.append('BOMB')
+    
     if len(valid_actions) == 0:
         valid_actions.append('WAIT')
-    
-    # Überprüfe, ob BOMB eine gültige Aktion ist (z.B. keine Bombe direkt daneben)
-    if (game_state['self'][2] and all(np.linalg.norm(np.array(bomb[:2]) - np.array((x, y))) > 1 for bomb in bombs)):
-        valid_actions.append('BOMB')
     
     return valid_actions
 

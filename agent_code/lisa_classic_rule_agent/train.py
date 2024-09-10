@@ -10,11 +10,11 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 def setup_training(self):
     self.logger.info("Setting up training variables.")
     self.q_table = {}
-    self.alpha = 0.1  # Lernrate
+    self.alpha = 0.2  # Lernrate
     self.gamma = 0.9  # Diskontfaktor
-    self.epsilon = 0.97  # Epsilon für epsilon-greedy
+    self.epsilon = 0.99  # Epsilon für epsilon-greedy
     self.epsilon_decay = 0.995  # Epsilon-Decay
-    self.epsilon_min = 0.1
+    self.epsilon_min = 0.3
     self.last_positions = []
     self.last_actions = []
     self.bomb_history = deque([], 5)
@@ -163,19 +163,19 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: list[str
 def reward_from_events(self, events: list[str], old_game_state: dict, new_game_state: dict, self_action: str) -> int:
     game_rewards = {
         e.COIN_COLLECTED: 200,
-        e.KILLED_OPPONENT: 10,
+        e.KILLED_OPPONENT: 50,
         e.MOVED_UP: -0.1,
         e.MOVED_DOWN: -0.1,
         e.MOVED_LEFT: -0.1,
         e.MOVED_RIGHT: -0.1,
         e.WAITED: -0.7,
-        e.BOMB_DROPPED: - 5, 
-        e.INVALID_ACTION: -1,
+        e.BOMB_DROPPED: - 2, 
+        e.INVALID_ACTION: -10,
         e.GOT_KILLED: -200,
         e.KILLED_SELF: -300,
-        "STUCK_IN_LOOP": -10,
-        "BOMB_PLACED_NEAR_BOXES": 1,
-        "ESCAPED_BOMB": 1,
+        "STUCK_IN_LOOP": -20,
+        "BOMB_PLACED_NEAR_BOXES": 10,
+        "ESCAPED_BOMB": 3,
         "ENTERED_DANGER": -4,
         "USELESS_BOMB_PLACEMENT": -50
     }
@@ -202,7 +202,7 @@ def reward_from_events(self, events: list[str], old_game_state: dict, new_game_s
             if new_min_dist < old_min_dist:
                 reward_sum += 10
             else:
-                reward_sum -= 0.5  # Bestrafung für sich von Münzen entfernen
+                reward_sum -= 0.2  # Bestrafung für sich von Münzen entfernen
         
                 # Bonus für das sichere Platzieren einer Bombe
 
