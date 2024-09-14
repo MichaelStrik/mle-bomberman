@@ -19,10 +19,17 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
 STEP_TOWARD_BFS_COIN = "STEP_TOWARD_BFS_COIN"
+COIN_DIST_INCREASED = "COIN_DIST_INCREASED"
 
 # Actions
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
+GAMMA = 0
+ALPHA = 0.1
+EPSILON = 0.5
+EPSILON_DECAY = 0.995
+ALPHA_DECAY = 0.995
+EPSILON_MIN = 0.1
 
 def setup_training(self):
     """
@@ -48,12 +55,12 @@ def setup_training(self):
 
     # parameters, info
     self.round = 0
-    self.alpha = 0.2  # Lernrate davor 0.1
-    self.gamma = 0.95  # Diskontfaktor um so höher um so stärker werden zufällige gewinne belohnt
-    self.epsilon = 0.5  # exploration probability (epsilon-greedy method)
-    self.epsilon_decay = 0.95  # Epsilon-Decay für Exploration-Exploitation Tradeoff
-    self.alpha_decay = 0.995
-    self.epsilon_min = 0.1
+    self.alpha = ALPHA  # Lernrate davor 0.1
+    self.gamma = GAMMA  # Diskontfaktor um so höher um so stärker werden zufällige gewinne belohnt
+    self.epsilon = EPSILON  # exploration probability (epsilon-greedy method)
+    self.epsilon_decay = EPSILON_DECAY  # Epsilon-Decay für Exploration-Exploitation Tradeoff
+    self.alpha_decay = ALPHA_DECAY
+    self.epsilon_min = EPSILON_MIN
 
 
 
@@ -84,7 +91,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     action_idx = ACTIONS.index(self_action)
 
     # Logger: write game events to logger
-    self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    self.logger.debug(f'Event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     # NOTE generalization from smaller fields happens here
     if old_state not in self.q_table:
@@ -93,11 +100,20 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if new_state not in self.q_table:
         self.q_table[new_state] = np.zeros(len(ACTIONS))
 
+    # step toward coin found by BFS
     coin_step_id = old_state[2][0]
     coin_step_name = Actions(coin_step_id).name
     if coin_step_name == self_action and e.COIN_COLLECTED not in events:
         events.append(STEP_TOWARD_BFS_COIN)
 
+    # distance to nearest coin increased
+    coin_dist_old = old_state[2][1]
+    coin_dist_new = new_state[2][1]
+    if coin_dist_new > coin_dist_old and e.COIN_COLLECTED not in events:
+        events.append(COIN_DIST_INCREASED)
+
+    if self_action == 'WAIT':
+        events.append('WAIT')
     
     # Reward: hand out rewards
     reward = reward_from_events(self, events, old_game_state, new_game_state)
@@ -172,7 +188,10 @@ def reward_from_events(self, events: List[str], old_game_state, new_game_state) 
     game_rewards = {
         e.COIN_COLLECTED: 1,
         e.KILLED_OPPONENT: 5,
-        STEP_TOWARD_BFS_COIN: 1/(coin_dist)
+        STEP_TOWARD_BFS_COIN: 1/(coin_dist),
+        COIN_DIST_INCREASED: -1/(coin_dist),
+        'WAIT': -0.001
+
     }
     reward_sum = 0
     for event in events:

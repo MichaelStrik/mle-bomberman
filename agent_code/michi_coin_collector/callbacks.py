@@ -50,7 +50,6 @@ def setup(self):
     self.alpha = 1        # learning rate
     self.gamma = 0.9        # discount factor
     self.epsilon = 0.1
-    self.epsilon_decay = 0.995  # ?
     self.epsilon_min = 0.1  # minimum exploration probability
     
 
@@ -129,13 +128,20 @@ def act(self, game_state: dict) -> str:
 
     if r < self.epsilon:
         # exploration
-        self.logger.info(f"RANDOM (r={r}:.2):")
+        self.logger.info(f"RANDOM (eps={self.epsilon:.2}, r={r:.2}):")
         action = np.random.choice(valid_actions)
     else:
         # exploitation
         self.logger.info("Q-CHOICE:")
         valid_q_values = [q_values[ACTIONS.index(action)] for action in valid_actions]
         action = valid_actions[np.argmax(valid_q_values)]
+
+        # if q_values are all the same, choose a random action
+        qval1 = valid_q_values[0]
+        valid_q_values = np.array(valid_q_values)
+        if (valid_q_values == qval1).all():
+            action = np.random.choice(valid_actions)
+
 
     return action
 
@@ -247,7 +253,6 @@ def bfs_coin(start, field, coins) -> Node | None :
 
     while queue:
         v = queue.popleft()
-        # TODO stop when coin found
         if (v.x, v.y) in coins:
             return v
 
