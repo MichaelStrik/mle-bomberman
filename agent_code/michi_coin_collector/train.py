@@ -25,9 +25,9 @@ COIN_DIST_INCREASED = "COIN_DIST_INCREASED"
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 GAMMA = 0
-ALPHA = 0.1
+ALPHA = 0.2
 EPSILON = 0.5
-EPSILON_DECAY = 0.995
+EPSILON_DECAY = 0.98
 ALPHA_DECAY = 0.995
 EPSILON_MIN = 0.1
 
@@ -129,7 +129,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
                                               self.alpha * (reward - self.q_table[old_state][action_idx])
     
-    # NOTE Lisa adds a decay of epsilon in her code here --> good idea. is there an alternative?
+    # NOTE Lisa adds a decay of epsilon in her code here --> good idea generally. 
+    # is there an alternative place?
     # How fast should epsilon decay?
 
 
@@ -199,3 +200,24 @@ def reward_from_events(self, events: List[str], old_game_state, new_game_state) 
             reward_sum += game_rewards[event]
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
+
+
+def rotate(state, n):
+    """
+    Rotate state n times (n=1,2,3) by 90°.
+    """
+
+    # numpy.rot90 is my friend
+
+    pass
+
+
+def mirror(state, axis):
+
+    # mirroring on the axes parallel to the square's sides should be an easy flip, there's a numpy
+    # function for that. 
+    # then we have the transpose which is easy too
+    # mirroring on the second diagonal is also not that hard actually, we have to swap entries
+    # which may be fiddly though
+
+    pass

@@ -128,19 +128,23 @@ def act(self, game_state: dict) -> str:
 
     if r < self.epsilon:
         # exploration
-        self.logger.info(f"RANDOM (eps={self.epsilon:.2}, r={r:.2}):")
         action = np.random.choice(valid_actions)
+        self.logger.info(f"RANDOM (eps={self.epsilon:.2}, r={r:.2}): " + action)
     else:
         # exploitation
-        self.logger.info("Q-CHOICE:")
+        # determine ALL valid actions with the highest q_value 
+        # (could be several with the same maximal value)
         valid_q_values = [q_values[ACTIONS.index(action)] for action in valid_actions]
-        action = valid_actions[np.argmax(valid_q_values)]
+        q_val_max = np.max(valid_q_values)
+        q_val_max_idx = np.argwhere(valid_q_values == q_val_max)
 
-        # if q_values are all the same, choose a random action
-        qval1 = valid_q_values[0]
-        valid_q_values = np.array(valid_q_values)
-        if (valid_q_values == qval1).all():
-            action = np.random.choice(valid_actions)
+        valid_actions = np.array(valid_actions)
+        q_actions = valid_actions[q_val_max_idx]
+
+        # if there's not a unique maximum, make a random choice among them
+        #FakeItTillYouMakeIt
+        action = np.random.choice(q_actions.reshape(-1))
+        self.logger.info("Q-CHOICE: " + action)
 
 
     return action
@@ -176,10 +180,13 @@ def state_to_features(game_state: dict) -> np.array:
     idx_y = np.fmax(idx_y, np.zeros(len(idx_y), dtype=int))
     idx_y = np.fmin(idx_y, (s.COLS-1)*np.ones_like(idx_y, dtype=int))
     # read from field
-    env5x5_field = game_state['field'][idx_x, idx_y]
+    env5x5_field = game_state['field'][idx_x]
+    env5x5_field = env5x5_field[:, idx_y]
+    # env5x5_field = game_state['field'][idx_x, idx_y]
     env5x5_field = env5x5_field.flatten()
     env5x5_coins = [(coin[0]-pos[0],coin[1]-pos[1]) for coin in game_state['coins'] \
-                    if coin[0]-pos[0]<=2 or coin[1]-pos[1]<=2]
+                    if abs(coin[0]-pos[0])<=2 and abs(coin[1]-pos[1])<=2]
+    env5x5_coins.sort()
     env5x5_coins = tuple(env5x5_coins)
     # env5x5_coins = np.array(env5x5_coins)[0]
     
