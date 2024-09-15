@@ -13,12 +13,12 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 class Actions(Enum):
     """ Enum class. """
-    UP  = 1
-    RIGHT = 2
+    UP  = 0
+    RIGHT = 1
+    DOWN = 2
     LEFT = 3
-    DOWN = 4
-    WAIT = 5
-    BOMB = 6
+    WAIT = 4
+    BOMB = 5
 
 
 def setup(self):
@@ -175,7 +175,8 @@ def state_to_features(game_state: dict) -> np.array:
     idx_y = np.arange(pos[1]-2, pos[1]+3)
     # prevent out of bounds access
     idx_x = np.fmax(idx_x, np.zeros_like(idx_x, dtype=int))
-    # TODO which one is COLS, which one is ROWS?
+    # TODO which one is COLS, which one is ROWS?--> doesn't matter 
+    # as long COLS=ROWS / field is a square
     idx_x = np.fmin(idx_x, (s.COLS-1)*np.ones_like(idx_x, dtype=int))
     idx_y = np.fmax(idx_y, np.zeros(len(idx_y), dtype=int))
     idx_y = np.fmin(idx_y, (s.COLS-1)*np.ones_like(idx_y, dtype=int))

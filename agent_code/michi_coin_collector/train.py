@@ -225,30 +225,36 @@ def rotate(state, action, k):
     env5x5_field = np.array(state[0])
     env5x5_field = env5x5_field.reshape((5,5))
     env5x5_field = np.rot90(env5x5_field, k=k)
-    env5x5_field = env5x5_field.flatten()
+    env5x5_field_rot = env5x5_field.flatten()
 
     # rotate relative coin positions
     env5x5_coins = state[1]
     k = k%4
     rad = k*np.pi/2
-    rot_matrix = np.array(  [np.cos(rad), -np.sin(rad)],
-                            [np.sin(rad),  np.cos(rad)]  )
+    rot_matrix = np.array(( [np.cos(rad), -np.sin(rad)],
+                            [np.sin(rad),  np.cos(rad)]  ))
     env5x5_coins_rot = []
     for coin in env5x5_coins:
         coin = rot_matrix@np.array(coin) #rotate
         env5x5_coins_rot.append(tuple(coin))
     env5x5_coins_rot.sort()
 
-    # rotate bfs coin direction
+    # rotate bfs coin direction (in enum representation)
+    # UP --> RIGHT --> DOWN --> LEFT (--> UP)
+    # note that we need to rotate the associated vector (see beginning of file)
     coin_step, dist = state[2]
-    coin_step_name = Actions(coin_step).name
-    vec = DIR_TO_VEC[coin_step_name]
-    vec = rot_matrix@np.array(vec) #rotate
-    coin_step_rot = VEC_TO_DIR[tuple(vec)]
+    coin_step_rot = (coin_step+k)%4
 
-    rot_state = [tuple(env5x5_field), tuple(env5x5_coins_rot), (coin_step_rot, dist)]
+    # assemble rotated state
+    rot_state = [tuple(env5x5_field_rot), tuple(env5x5_coins_rot), (coin_step_rot, dist)]
 
-    return rot_state
+    # rotate action (in enum representation)
+    Actions = Actions(0)
+    action_id = Actions.action.value
+    rot_action_id = (action_id+1)%4
+    rot_action = Actions(rot_action_id).name
+
+    return rot_state, rot_action
 
 
 def mirror(state, axis):
@@ -266,7 +272,12 @@ def mirror(state, axis):
     elif axis==2:
         pass
     elif axis==3:
-        pass
+        # rotate 90°
+        np.rot90(k=1)
+        # bla
+        # rotate back
+        np.rot(90,k=3)
+
     elif axis==4:
         print("SMASH")
     else:
