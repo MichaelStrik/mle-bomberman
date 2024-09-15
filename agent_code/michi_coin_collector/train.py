@@ -24,9 +24,23 @@ COIN_DIST_INCREASED = "COIN_DIST_INCREASED"
 # Actions
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
+DIR_TO_VEC = {
+        'UP':    (0, -1),
+        'RIGHT': (1,  0),
+        'DOWN':  (0,  1),
+        'LEFT':  (-1, 0)
+    }
+
+VEC_TO_DIR = {
+        (0, -1): 'UP',
+        (1,  0): 'RIGHT',
+        (0,  1): 'DOWN',
+        (-1, 0): 'LEFT'
+    }
+
 GAMMA = 0
 ALPHA = 0.2
-EPSILON = 0.5
+EPSILON = 0.1
 EPSILON_DECAY = 0.98
 ALPHA_DECAY = 0.995
 EPSILON_MIN = 0.1
@@ -189,9 +203,9 @@ def reward_from_events(self, events: List[str], old_game_state, new_game_state) 
     game_rewards = {
         e.COIN_COLLECTED: 1,
         e.KILLED_OPPONENT: 5,
+        e.WAITED: -0.001,
         STEP_TOWARD_BFS_COIN: 1/(coin_dist),
-        COIN_DIST_INCREASED: -1/(coin_dist),
-        'WAIT': -0.001
+        COIN_DIST_INCREASED: -1/(coin_dist)
 
     }
     reward_sum = 0
@@ -202,22 +216,65 @@ def reward_from_events(self, events: List[str], old_game_state, new_game_state) 
     return reward_sum
 
 
-def rotate(state, n):
+def rotate(state, action, k):
     """
-    Rotate state n times (n=1,2,3) by 90°.
+    Rotate 'state' and 'action' for 'k' times counterclockwise by 90°.
     """
 
-    # numpy.rot90 is my friend
+    # rotate field environment
+    env5x5_field = np.array(state[0])
+    env5x5_field = env5x5_field.reshape((5,5))
+    env5x5_field = np.rot90(env5x5_field, k=k)
+    env5x5_field = env5x5_field.flatten()
 
-    pass
+    # rotate relative coin positions
+    env5x5_coins = state[1]
+    k = k%4
+    rad = k*np.pi/2
+    rot_matrix = np.array(  [np.cos(rad), -np.sin(rad)],
+                            [np.sin(rad),  np.cos(rad)]  )
+    env5x5_coins_rot = []
+    for coin in env5x5_coins:
+        coin = rot_matrix@np.array(coin) #rotate
+        env5x5_coins_rot.append(tuple(coin))
+    env5x5_coins_rot.sort()
+
+    # rotate bfs coin direction
+    coin_step, dist = state[2]
+    coin_step_name = Actions(coin_step).name
+    vec = DIR_TO_VEC[coin_step_name]
+    vec = rot_matrix@np.array(vec) #rotate
+    coin_step_rot = VEC_TO_DIR[tuple(vec)]
+
+    rot_state = [tuple(env5x5_field), tuple(env5x5_coins_rot), (coin_step_rot, dist)]
+
+    return rot_state
 
 
 def mirror(state, axis):
+    """
+    Mirroring state on axis (axis=1,2,3,4) with the following correspondences: 
+        axis = 1: The diagonal axis (~matrix transposition)
+        axis = 2: Vertical axis
+        axis = 3: The second diagonal (bottom left corner to top right corner)
+        axis = 4: Horizontal axis
+
+    """
+
+    if axis==1:
+        pass
+    elif axis==2:
+        pass
+    elif axis==3:
+        pass
+    elif axis==4:
+        print("SMASH")
+    else:
+        raise ValueError("'axis' must be one of [1,2,3].")
+
 
     # mirroring on the axes parallel to the square's sides should be an easy flip, there's a numpy
     # function for that. 
     # then we have the transpose which is easy too
     # mirroring on the second diagonal is also not that hard actually, we have to swap entries
-    # which may be fiddly though
-
-    pass
+    # which may be fiddly though --> actually not, rotate once, transpose, rotate back

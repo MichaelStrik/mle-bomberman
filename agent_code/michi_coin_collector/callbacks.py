@@ -184,11 +184,11 @@ def state_to_features(game_state: dict) -> np.array:
     env5x5_field = env5x5_field[:, idx_y]
     # env5x5_field = game_state['field'][idx_x, idx_y]
     env5x5_field = env5x5_field.flatten()
+
+    # relative positions of coins
     env5x5_coins = [(coin[0]-pos[0],coin[1]-pos[1]) for coin in game_state['coins'] \
                     if abs(coin[0]-pos[0])<=2 and abs(coin[1]-pos[1])<=2]
     env5x5_coins.sort()
-    env5x5_coins = tuple(env5x5_coins)
-    # env5x5_coins = np.array(env5x5_coins)[0]
     
     # nearest reachable coin
     node = bfs_coin(pos, game_state['field'], game_state['coins'])
