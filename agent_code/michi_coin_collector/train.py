@@ -236,7 +236,7 @@ def rotate(state, action, k):
     env5x5_coins_rot = []
     for coin in env5x5_coins:
         coin = rot_matrix@np.array(coin) #rotate
-        env5x5_coins_rot.append(tuple(coin))
+        env5x5_coins_rot.append( tuple( (int(coin[0]), int(coin[1])) ) )
     env5x5_coins_rot.sort()
 
     # rotate bfs coin direction (in enum representation)
@@ -251,13 +251,13 @@ def rotate(state, action, k):
     # rotate action (in enum representation)
     Actions = Actions(0)
     action_id = Actions.action.value
-    rot_action_id = (action_id+1)%4
+    rot_action_id = (action_id+k)%4
     rot_action = Actions(rot_action_id).name
 
     return rot_state, rot_action
 
 
-def mirror(state, axis):
+def mirror(state, action, axis):
     """
     Mirroring state on axis (axis=1,2,3,4) with the following correspondences: 
         axis = 1: The diagonal axis (~matrix transposition)
@@ -266,26 +266,94 @@ def mirror(state, axis):
         axis = 4: Horizontal axis
 
     """
-
+    env5x5_field = np.array(state[0]).reshape((5,5))
+    env5x5_coins = np.array( [np.array(coin) for coin in state[1]] )
+    coin_step, dist = state[2]
+    coin_step_enum = Actions(coin_step)
+    coin_step_name = coin_step_enum.name
+    action_id = coin_step_enum.action.value
+    
     if axis==1:
-        pass
+        # diagonal (transpose field)
+        env5x5_field = env5x5_field.T
+        env5x5_coins = np.array( [ (-coin[1], -coin[0]) for coin in state[1]] )
+        if coin_step_name == 'UP' or coin_step_name == 'DOWN':
+            coin_step_mirror = (coin_step+1)%4
+        elif coin_step_name == 'RIGHT' or coin_step_name == 'LEFT':
+            coin_step_mirror = (coin_step-1)%4
+        else:
+            # coin_step is 'WAIT'
+            coin_step_mirror = coin_step
+        
+        if action == 'DOWN' or action == 'UP':
+            action_id_mirror = (action_id+1)%4
+        elif action == 'RIGHT' or action == 'LEFT':
+            action_id_mirror = (action_id-1)%4
+        else:
+            # action is 'WAIT' or 'BOMB'
+            action_id_mirror = action_id
+
     elif axis==2:
-        pass
+        # mirror vertically
+        env5x5_field = np.fliplr(env5x5_field)
+        env5x5_coins = np.array( [ (-coin[0], coin[1]) for coin in state[1]] )
+        if coin_step_name == 'LEFT' or coin_step_name == 'RIGHT':
+            coin_step_mirror = (coin_step+2)%4
+        else:
+            coin_step_mirror = coin_step
+        if action == 'LEFT' or action == 'RIGHT':
+            action_id_mirror = (action_id+2)%4
+        else:
+            action_id_mirror = action_id
+    
     elif axis==3:
+        # second diagonal
+        # mirroring on the second diagonal can be done as follows: rotate once, transpose, rotate back
+
         # rotate 90°
-        np.rot90(k=1)
-        # bla
+        env5x5_field = np.rot90(env5x5_field, k=1)
+        # transpose
+        env5x5_field = env5x5_field.T
         # rotate back
-        np.rot(90,k=3)
+        env5x5_field = np.rot90(env5x5_field,k=3)
+
+        # directional vectors flip entries
+        env5x5_coins = np.array( [ (coin[1], coin[0]) for coin in state[1]] )
+
+        if coin_step_name == 'RIGHT' or coin_step_name == 'LEFT':
+            coin_step_mirror = (coin_step+1)%4
+        elif coin_step_name == 'UP' or coin_step_name == 'DOWN':
+            coin_step_mirror = (coin_step-1)%4
+        else:
+            # coin_step is 'WAIT'
+            coin_step_mirror = coin_step
+        
+        if action == 'RIGHT' or action == 'LEFT':
+            action_id_mirror = (action_id+1)%4
+        elif action == 'DOWN' or action == 'UP':
+            action_id_mirror = (action_id-1)%4
+        else:
+            # action is 'WAIT' or 'BOMB'
+            action_id_mirror = action_id
 
     elif axis==4:
-        print("SMASH")
+        # mirror horizontally        
+        env5x5_field = np.flipud(env5x5_field)
+        env5x5_coins = np.array( [ (coin[0], -coin[1]) for coin in state[1]] )
+        if coin_step_name == 'UP' or coin_step_name == 'DOWN':
+            coin_step_mirror = (coin_step+2)%4
+        else:
+            coin_step_mirror = coin_step
+        if action == 'UP' or action == 'DOWN':
+            action_id_mirror = (action_id+2)%4
+        else:
+            action_id_mirror = action_id
+
     else:
-        raise ValueError("'axis' must be one of [1,2,3].")
+        raise ValueError("'axis' must be one of [1,2,3,4].")
 
+    # assemble return
+    mir_state  = [env5x5_field, env5x5_coins, (coin_step_mirror, dist)]
+    mir_action = Actions(action_id_mirror).name
 
-    # mirroring on the axes parallel to the square's sides should be an easy flip, there's a numpy
-    # function for that. 
-    # then we have the transpose which is easy too
-    # mirroring on the second diagonal is also not that hard actually, we have to swap entries
-    # which may be fiddly though --> actually not, rotate once, transpose, rotate back
+    return mir_state, mir_action
