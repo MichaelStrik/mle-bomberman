@@ -38,11 +38,11 @@ VEC_TO_DIR = {
         (-1, 0): 'LEFT'
     }
 
-GAMMA = 0
-ALPHA = 0.2
-EPSILON = 0.1
-EPSILON_DECAY = 0.98
-ALPHA_DECAY = 0.995
+GAMMA = 0.6
+ALPHA = 0.3
+EPSILON = 0.4
+EPSILON_DECAY = 0.995
+ALPHA_DECAY = 1.0#0.995
 EPSILON_MIN = 0.1
 
 def setup_training(self):
@@ -80,7 +80,11 @@ def setup_training(self):
 def rotate(state, action, k):
     """
     Rotate 'state' and 'action' for 'k' times counterclockwise by 90°.
+    Returns (None, None) if one of 'state' and 'action' is None.
     """
+
+    if state is None or action is None:
+        return None, None
 
     # rotate field environment
     env5x5_field = np.array(state[0])
@@ -108,9 +112,9 @@ def rotate(state, action, k):
 
     # assemble rotated state
     rot_state = [tuple(env5x5_field_rot), tuple(env5x5_coins_rot), (coin_step_rot, dist)]
+    rot_state = tuple(rot_state)
 
     # rotate action (in enum representation)
-    Actions = Actions(0)
     if action == 'UP':
         action_id = Actions.UP.value
         rot_action_id = (action_id+k)%4
@@ -149,13 +153,17 @@ def mirror(state, action, axis):
         axis = 3: The second diagonal (bottom left corner to top right corner)
         axis = 4: Horizontal axis
 
+    Returns (None, None) if one of 'state' and 'action' is None.
+
     """
+
+    if state is None or action is None:
+        return None, None
+    
     env5x5_field = np.array(state[0]).reshape((5,5))
-    env5x5_coins = np.array( [np.array(coin) for coin in state[1]] )
     coin_step, dist = state[2]
     coin_step_enum = Actions(coin_step)
     coin_step_name = coin_step_enum.name
-    Actions = Actions(0)
     if action == 'UP':
         action_id = Actions.UP.value
     elif action == 'RIGHT':
@@ -172,7 +180,7 @@ def mirror(state, action, axis):
     if axis==1:
         # diagonal (transpose field)
         env5x5_field = env5x5_field.T
-        env5x5_coins = np.array( [ (-coin[1], -coin[0]) for coin in state[1]] )
+        env5x5_coins = [ (-coin[1], -coin[0]) for coin in state[1]]
         if coin_step_name == 'UP' or coin_step_name == 'DOWN':
             coin_step_mirror = (coin_step+1)%4
         elif coin_step_name == 'RIGHT' or coin_step_name == 'LEFT':
@@ -192,7 +200,7 @@ def mirror(state, action, axis):
     elif axis==2:
         # mirror vertically
         env5x5_field = np.fliplr(env5x5_field)
-        env5x5_coins = np.array( [ (-coin[0], coin[1]) for coin in state[1]] )
+        env5x5_coins = [ (-coin[0], coin[1]) for coin in state[1]]
         if coin_step_name == 'LEFT' or coin_step_name == 'RIGHT':
             coin_step_mirror = (coin_step+2)%4
         else:
@@ -214,7 +222,7 @@ def mirror(state, action, axis):
         env5x5_field = np.rot90(env5x5_field,k=3)
 
         # directional vectors flip entries
-        env5x5_coins = np.array( [ (coin[1], coin[0]) for coin in state[1]] )
+        env5x5_coins = [ (coin[1], coin[0]) for coin in state[1]]
 
         if coin_step_name == 'RIGHT' or coin_step_name == 'LEFT':
             coin_step_mirror = (coin_step+1)%4
@@ -235,7 +243,7 @@ def mirror(state, action, axis):
     elif axis==4:
         # mirror horizontally        
         env5x5_field = np.flipud(env5x5_field)
-        env5x5_coins = np.array( [ (coin[0], -coin[1]) for coin in state[1]] )
+        env5x5_coins = [ (coin[0], -coin[1]) for coin in state[1] ]
         if coin_step_name == 'UP' or coin_step_name == 'DOWN':
             coin_step_mirror = (coin_step+2)%4
         else:
@@ -249,10 +257,33 @@ def mirror(state, action, axis):
         raise ValueError("'axis' must be one of [1,2,3,4].")
 
     # assemble return
-    mir_state  = [env5x5_field, env5x5_coins, (coin_step_mirror, dist)]
+    env5x5_field = tuple(env5x5_field.flatten())
+    env5x5_coins.sort()
+    env5x5_coins = tuple(env5x5_coins)
+    mir_state  = tuple([env5x5_field, env5x5_coins, (coin_step_mirror, dist)])
     mir_action = Actions(action_id_mirror).name
 
     return mir_state, mir_action
+
+
+def update_q_table(self, old_state, self_action, new_state, reward):
+    action_idx = ACTIONS.index(self_action)
+
+    if old_state not in self.q_table:
+        self.q_table[old_state] = np.zeros(len(ACTIONS))
+
+    if new_state not in self.q_table:
+        self.q_table[new_state] = np.zeros(len(ACTIONS))
+
+    # Update: SARSA
+    if new_state is not None:
+        next_action = np.argmax(self.q_table[new_state])
+        self.q_table[old_state][action_idx] = \
+            self.q_table[old_state][action_idx] + \
+            self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
+    else:
+        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
+                                              self.alpha * (reward - self.q_table[old_state][action_idx])
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -284,12 +315,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Logger: write game events to logger
     self.logger.debug(f'Event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
-    # NOTE generalization from smaller fields happens here
-    if old_state not in self.q_table:
-        self.q_table[old_state] = np.zeros(len(ACTIONS))
-    
-    if new_state not in self.q_table:
-        self.q_table[new_state] = np.zeros(len(ACTIONS))
+    # NOTE generalization from smaller fields can be implemented here
 
     # step toward coin found by BFS
     coin_step_id = old_state[2][0]
@@ -303,39 +329,26 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if coin_dist_new > coin_dist_old and e.COIN_COLLECTED not in events:
         events.append(COIN_DIST_INCREASED)
 
-
     
     # Reward: hand out rewards
     reward = reward_from_events(self, events, old_game_state, new_game_state)
     # self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
 
-    # Update: SARSA
-    if new_game_state is not None:
-        next_action = np.argmax(self.q_table[new_state])
-        self.q_table[old_state][action_idx] = \
-            self.q_table[old_state][action_idx] + \
-            self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
-    else:
-        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                              self.alpha * (reward - self.q_table[old_state][action_idx])
+    ## Q-table updates
+    # original state
+    update_q_table(self, old_state, self_action, new_state, reward)
+    
+    # rotations
+    for k in range(1, 4):
+        old_state_rot, self_action_rot = rotate(old_state, self_action, k)
+        new_state_rot, _ = rotate(new_state, self_action, k)
+        update_q_table(self, old_state_rot, self_action_rot, new_state_rot, reward)
 
-
-    # Update: SARSA
-    if new_game_state is not None:
-        old_symmetric_states = []
-        old_symmetric_states.append((old_state, self_action))
-        old_symmetric_states.append( rotate(old_state, self_action, 1) )
-        old_symmetric_states.append( rotate(old_state, self_action, 2) )
-        old_symmetric_states.append( rotate(old_state, self_action, 3) )
-
-
-        next_action = np.argmax(self.q_table[new_state])
-        self.q_table[old_state][action_idx] = \
-            self.q_table[old_state][action_idx] + \
-            self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
-    else:
-        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                              self.alpha * (reward - self.q_table[old_state][action_idx])
+    # mirrors
+    for axis in range(1, 5):
+        old_state_mir, self_action_mir = mirror(old_state, self_action, axis)
+        new_state_mir, _ = mirror(new_state, self_action, axis)
+        update_q_table(self, old_state_mir, self_action_mir, new_state_mir, reward)
 
     # NOTE Lisa adds a decay of epsilon in her code here --> good idea generally. 
     # is there an alternative place?
@@ -365,20 +378,16 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     last_state = state_to_features(last_game_state)
     last_state = tuple(last_state)
 
-    # TODO what if state is not existent in q-table yet?
+    # NOTE what if state is not existent in q-table yet?
     # do we fill the initial q-table with random values or zeros?
     # (we probably don't actually want to fill the q_table variable for memory reasons)
-
-    action_idx = ACTIONS.index(last_action)
     
     # Reward mit den letzten Zuständen
     reward = reward_from_events(self, events, last_game_state, None)
 
     # End of round Q-Update
-    self.q_table[last_state][action_idx] = self.q_table[last_state][action_idx] + \
-                                           self.alpha * (reward - self.q_table[last_state][action_idx])
+    update_q_table(self, None, last_action, last_state, reward)
 
-    # TODO save the model
     with open("my-saved-model.pt", "wb") as file:
         pickle.dump(self.q_table, file)
 
