@@ -272,6 +272,9 @@ def simulate_explosion_map(explosion_map, bombs, k):
     """
     Simulates how explosion_map would look like in 'k' steps taking into account
     the current explosion_map and the current placed bombs.
+
+    NOTE: the counters in the simulated explosion_map can not guaranteed to be correct
+    as a 2 may be overwritten by a 1.
     """
     explosion_map_simulated = np.fmax(explosion_map-k, np.zeros_like(explosion_map))
 
@@ -286,48 +289,45 @@ def simulate_explosion_map(explosion_map, bombs, k):
     return explosion_map_simulated
 
 
-def is_safe(pos, bombs, explosion_map, steps):
-    pass
-
-
-def dfs_dangerous_steps(start, field, bombs, explosion_map):
+def is_safe(pos, explosion_map, bombs, steps):
     """
+    Returns True if pos is safe (no explosion at pos) in 'steps' steps taking into account the current explosion_maps
+    and bombs lying on the field.
+    """
+    explosion_map_simulated = simulate_explosion_map(explosion_map, bombs, steps)
+    safe_flag = bool(explosion_map_simulated[pos])
 
+    return safe_flag
+
+
+def dfs_escape_danger(start, field, bombs, explosion_map):
+    """
     Variant of dfs that searches for ways out of dangerous fields.
 
     :param start:   The position (x,y) from where to start the search with dfs.
     :param field:   The games's current field.
     :param bombs:   The bombs that currently lie on the field, including their respective timers.
     :param explosion_map: The current explosion_map.
-
     """
 
     start = Node(start[0], start[1], parent=None, distance=0)
     stack = [start]
 
     while stack:
-        # stopping criterion & return TODO include in while condition
-        if False:
-            return None
-
         v = stack.pop()
         steps = v.distance # we misuse the distance for a game step counter here
+
+        if steps>=4:
+            # after 4 steps, no new explosion fields add and we have found a safe way
+            return v
 
         for dx, dy in [ (0, 0), (-1, 0), (1, 0), (0, 1), (0, -1) ]:
             nx, ny = v.x + dx, v.y + dy
             # if position is feasible, push to stack
             if (    0 <= nx < field.shape[0] 
-                and 0 <= ny < field.shape[1]
-                and field[nx, ny] == 0
-                and is_safe((nx, ny), bombs, explosion_map, steps)  ):
-                stack.append( Node(nx, ny, parent=v, distance=v.distance + 1) )
+                    and 0 <= ny < field.shape[1]
+                    and field[nx, ny] == 0
+                    and is_safe((nx, ny), explosion_map, bombs, steps)  ):
+                stack.append( Node(nx, ny, parent=v, distance=steps+1) )
 
-    
     return None
-
-
-"""
-plan:
-write is_safe(...), then finish dfs_dangerous_step (give it a better name too)
-
-"""
