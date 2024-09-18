@@ -1,5 +1,6 @@
 import os
 import pickle
+import copy
 from collections import deque
 from enum import Enum
 
@@ -7,6 +8,7 @@ from enum import Enum
 import numpy as np
 
 import settings as s
+from .agent_variables import VEC_TO_DIR
 
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
@@ -149,12 +151,45 @@ def act(self, game_state: dict) -> str:
     return action
 
 
-def state_to_features(game_state: dict) -> np.array:
-    """
-    *This is not a required function, but an idea to structure your code.*
+def get_env5x5_field(pos, field) -> tuple:
+    # direct environment
+    idx_x = np.arange(pos[0]-2, pos[0]+3)
+    idx_y = np.arange(pos[1]-2, pos[1]+3)
+    # prevent out of bounds access
+    idx_x = np.fmax(idx_x, np.zeros_like(idx_x, dtype=int))
+    # NOTE which one is COLS, which one is ROWS?--> doesn't matter as long as COLS=ROWS / field is a square
+    idx_x = np.fmin(idx_x, (s.COLS-1)*np.ones_like(idx_x, dtype=int))
+    idx_y = np.fmax(idx_y, np.zeros(len(idx_y), dtype=int))
+    idx_y = np.fmin(idx_y, (s.COLS-1)*np.ones_like(idx_y, dtype=int))
+    # read from field
+    env5x5_field = field[idx_x]
+    env5x5_field = env5x5_field[:, idx_y]
+    env5x5_field = env5x5_field.flatten()
 
-    Converts the game state to the input of your model, i.e.
-    a feature vector.
+    return tuple(env5x5_field)
+
+
+def name_to_action_enum(name):
+    if name == 'UP':
+        enum = Actions.UP.value
+    elif name == 'RIGHT':
+        enum = Actions.RIGHT.value
+    elif name == 'DOWN':
+        enum = Actions.DOWN.value
+    elif name == 'LEFT':
+        enum = Actions.LEFT.value
+    elif name == 'WAIT':
+        enum = Actions.WAIT.value
+    elif name == 'BOMB':
+        enum = Actions.BOMB.value
+    else:
+        ValueError("Enum class Action does not know '"+name+"'\n.")
+    return enum
+
+
+def state_to_features(game_state: dict) -> list:
+    """
+    Converts the game state to the input of your model, i.e., a feature vector.
 
     You can find out about the state of the game environment via game_state,
     which is a dictionary. Consult 'get_state_for_agent' in environment.py to see
@@ -170,24 +205,13 @@ def state_to_features(game_state: dict) -> np.array:
 
     # direct environment
     pos = game_state['self'][3]
-    idx_x = np.arange(pos[0]-2, pos[0]+3)
-    idx_y = np.arange(pos[1]-2, pos[1]+3)
-    # prevent out of bounds access
-    idx_x = np.fmax(idx_x, np.zeros_like(idx_x, dtype=int))
-    # NOTE which one is COLS, which one is ROWS?--> doesn't matter as long as COLS=ROWS / field is a square
-    idx_x = np.fmin(idx_x, (s.COLS-1)*np.ones_like(idx_x, dtype=int))
-    idx_y = np.fmax(idx_y, np.zeros(len(idx_y), dtype=int))
-    idx_y = np.fmin(idx_y, (s.COLS-1)*np.ones_like(idx_y, dtype=int))
-    # read from field
-    env5x5_field = game_state['field'][idx_x]
-    env5x5_field = env5x5_field[:, idx_y]
-    # env5x5_field = game_state['field'][idx_x, idx_y]
-    env5x5_field = env5x5_field.flatten()
+    env5x5_field = get_env5x5_field(pos, game_state['field'])
 
     # relative positions of coins
     env5x5_coins = [(coin[0]-pos[0],coin[1]-pos[1]) for coin in game_state['coins'] \
                     if abs(coin[0]-pos[0])<=2 and abs(coin[1]-pos[1])<=2]
     env5x5_coins.sort()
+    env5x5_coins = tuple(env5x5_coins)
     
     # nearest reachable coin
     node = bfs_coin(pos, game_state['field'], game_state['coins'])
@@ -216,9 +240,12 @@ def state_to_features(game_state: dict) -> np.array:
         coin_step = dir_enum.WAIT.value
         dist = np.inf   # set dist=inf so that no reward is given 
                         # for action WAIT (reward decays with dist)
+
+    # dangerous steps (where there will be no escape from explosions)
+    dangerous_actions = identify_dangerous_actions(pos, game_state['field'], game_state['bombs'], game_state['explosion_map'])
     
     # that's it for now
-    channels = [tuple(env5x5_field), tuple(env5x5_coins), (coin_step, dist)]
+    channels = [env5x5_field, env5x5_coins, (coin_step, dist), dangerous_actions]
     
     return channels
 
@@ -229,9 +256,9 @@ class Node:
     Any Node has a coordinate, a parent that precedes it and a distance (the amount of steps
     that have been taken to get there).
     """
-    def __init__(self, x, y, parent, distance=None):
-        self.x = x
-        self.y = y
+    def __init__(self, pos, parent, distance=None):
+        self.x = pos[0]
+        self.y = pos[1]
         self.parent = parent
         self.distance = distance
 
@@ -248,7 +275,7 @@ def bfs_coin(start, field, coins) -> Node | None :
     :param coins:   The coordinates of all coins that currently lay on the field.
     """
 
-    start = Node(start[0], start[1], parent=None, distance=0)
+    start = Node(start, parent=None, distance=0)
     queue = deque([start])
     visited = set()
     visited.add( (start.x, start.y) )
@@ -262,7 +289,7 @@ def bfs_coin(start, field, coins) -> Node | None :
             nx, ny = v.x + dx, v.y + dy
             if (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]
                     and field[nx, ny] == 0 and (nx, ny) not in visited):
-                queue.append( Node(nx, ny, parent=v, distance=v.distance + 1) )
+                queue.append( Node((nx, ny), parent=v, distance=v.distance + 1) )
                 visited.add( (nx, ny) )
     
     return None
@@ -279,39 +306,70 @@ def simulate_explosion_map(explosion_map, bombs, k):
     explosion_map_simulated = np.fmax(explosion_map-k, np.zeros_like(explosion_map))
 
     for bomb in bombs:
-        timer = bomb[2]
+        timer = bomb[1]
         if timer-k <= 0:
             # bomb explodes in the next k steps
-             x,y = bomb[1]
-             explosion_map_simulated[x,max([y-3,0]):min([y+3,s.ROWS])] = max([timer-k+2,0])
-             explosion_map_simulated[max([x-3,0]):min([x+3,s.COLS]),y] = max([timer-k+2,0])
+             x,y = bomb[0]
+             explosion_map_simulated[x,max([y-3,0]):min([y+3+1,s.ROWS])] = max([timer-k+2,0])
+             explosion_map_simulated[max([x-3,0]):min([x+3+1,s.COLS]),y] = max([timer-k+2,0])
 
     return explosion_map_simulated
 
 
-def is_safe(pos, explosion_map, bombs, steps):
+def simulate_bombs(bombs, k):
+    """
+    Same as simulate_explosion_map, just for bombs.
+    """
+    bombs_simulated = []
+    for bomb in bombs:
+        bomb_sim = (bomb[0], max([0, bomb[1]-k])) # reduce bomb timer by k
+        if bomb_sim[1]>0:
+            bombs_simulated.append(bomb_sim)
+
+    return bombs_simulated
+
+
+def is_safe(new_pos, explosion_map, bombs, steps, last_pos=None):
     """
     Returns True if pos is safe (no explosion at pos) in 'steps' steps taking into account the current explosion_maps
     and bombs lying on the field.
+    Also returns False if a field is blocked by a bomb, i.e., the position .
     """
+    # explosion map
     explosion_map_simulated = simulate_explosion_map(explosion_map, bombs, steps)
-    safe_flag = bool(explosion_map_simulated[pos])
+    no_explosion = bool(explosion_map_simulated[new_pos])
+    # bombs
+    bombs_simulated = simulate_bombs(bombs, steps)
+    if last_pos is None:
+        no_bomb = (not any(new_pos == bomb[0] for bomb in bombs_simulated))
+    else:
+        no_bomb = (not any(new_pos == bomb[0] for bomb in bombs_simulated if not bomb[0] == last_pos))
 
-    return safe_flag
+    return (no_explosion and no_bomb)
 
 
 def dfs_escape_danger(start, field, bombs, explosion_map):
     """
     Variant of dfs that searches for ways out of dangerous fields.
 
-    :param start:   The position (x,y) from where to start the search with dfs.
+    :param start:   A start Node object from where to start the search with dfs.
+                    The member variable start.distance must be set to the step counter to start with.
+                    start.distance = 0 means we start at the current game step.
     :param field:   The games's current field.
     :param bombs:   The bombs that currently lie on the field, including their respective timers.
     :param explosion_map: The current explosion_map.
     """
 
-    start = Node(start[0], start[1], parent=None, distance=0)
     stack = [start]
+
+    # was start an explosion-free position in the first place?
+    if any((start.x, start.y) == bomb[0] for bomb in simulate_bombs(bombs, start.distance)):
+        last_pos = (start.x, start.y)
+    else:
+        last_pos = None
+
+    if not is_safe((start.x, start.y), explosion_map, bombs, start.distance, last_pos=last_pos):
+        return None
 
     while stack:
         v = stack.pop()
@@ -327,7 +385,53 @@ def dfs_escape_danger(start, field, bombs, explosion_map):
             if (    0 <= nx < field.shape[0] 
                     and 0 <= ny < field.shape[1]
                     and field[nx, ny] == 0
-                    and is_safe((nx, ny), explosion_map, bombs, steps)  ):
-                stack.append( Node(nx, ny, parent=v, distance=steps+1) )
+                    and is_safe((nx, ny), explosion_map, bombs, steps, last_pos=(v.x, v.y))
+                    ):
+                stack.append( Node((nx, ny), parent=v, distance=steps+1) )
 
     return None
+
+
+def bomb_is_safe(pos, field, bombs, explosion_map):
+    """
+    Checks if the action 'BOMB' would be safe at this position in the current game state.
+    It does so by searching for escapes with dfs_escape_danger(...).
+    """
+    bombs_new = copy.copy(bombs)
+    bombs_new.append((pos, 3))
+    start = Node(pos, parent=None, distance=1)
+    
+    return bool(dfs_escape_danger(start, field, bombs_new, explosion_map))
+
+
+def identify_dangerous_actions(pos, field, bombs, explosion_map):
+    # identify dangerous steps
+    steps_dangerous = []
+    for step in [(0,0), (-1,0), (0,-1), (1,0), (0,1)]:
+        start_pos = np.array(pos)+np.array(step)
+        start_pos = tuple(start_pos)
+        if not (0 <= start_pos[0] < field.shape[0] 
+                and 0 <= start_pos[1] < field.shape[1]
+                and field[start_pos] == 0
+                and not any(start_pos == bomb[0] for bomb in bombs if bomb[0]==pos)):
+            continue
+        # TODO check if we can take that step in the first place
+        start = Node(start_pos, parent=None, distance=1)
+        if dfs_escape_danger(start, field, bombs, explosion_map) is None:
+            steps_dangerous.append(step)
+
+    bomb_safe = bomb_is_safe(pos, field, bombs, explosion_map)
+    
+    # encode information
+    steps_dangerous_encoded = []
+    for step in steps_dangerous:
+        name = VEC_TO_DIR[step]
+        action_enum = name_to_action_enum(name)
+        steps_dangerous_encoded.append(action_enum)
+    if not bomb_safe:
+        steps_dangerous_encoded.append(name_to_action_enum('BOMB'))
+
+    steps_dangerous_encoded = list(set(steps_dangerous_encoded)) # safety first: make it unique if it's not
+    steps_dangerous_encoded.sort()
+
+    return tuple(steps_dangerous_encoded)

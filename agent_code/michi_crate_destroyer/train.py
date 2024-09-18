@@ -6,7 +6,7 @@ import pickle
 from typing import List
 
 import events as e
-from .callbacks import state_to_features, Actions
+from .callbacks import state_to_features, Actions, name_to_action_enum
 
 # This is only an example!
 Transition = namedtuple('Transition',
@@ -20,30 +20,18 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 PLACEHOLDER_EVENT = "PLACEHOLDER"
 STEP_TOWARD_BFS_COIN = "STEP_TOWARD_BFS_COIN"
 COIN_DIST_INCREASED = "COIN_DIST_INCREASED"
+TAKEN_DANGEROUS_ACTION = "TAKEN_DANGEROUS_ACTION"
 
 # Actions
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
-DIR_TO_VEC = {
-        'UP':    (0, -1),
-        'RIGHT': (1,  0),
-        'DOWN':  (0,  1),
-        'LEFT':  (-1, 0)
-    }
-
-VEC_TO_DIR = {
-        (0, -1): 'UP',
-        (1,  0): 'RIGHT',
-        (0,  1): 'DOWN',
-        (-1, 0): 'LEFT'
-    }
-
+# hyperparameters
 GAMMA = 0.6
 ALPHA = 0.3
 EPSILON = 0.4
 EPSILON_DECAY = 0.995
 ALPHA_DECAY = 1.0 # alpha is constant
-# EPSILON_MIN = 0.1 # not in use
+EPSILON_MIN = 0.0 # not in use
 
 def setup_training(self):
     """
@@ -329,6 +317,11 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if coin_dist_new > coin_dist_old and e.COIN_COLLECTED not in events:
         events.append(COIN_DIST_INCREASED)
 
+    # taken dangerous action
+    dangerous_actions = old_state[3]
+    action_enum = name_to_action_enum(self_action)
+    if action_enum in dangerous_actions:
+        events.append(TAKEN_DANGEROUS_ACTION)
     
     # Reward: hand out rewards
     reward = reward_from_events(self, events, old_game_state, new_game_state)
@@ -408,7 +401,8 @@ def reward_from_events(self, events: List[str], old_game_state, new_game_state) 
         e.KILLED_OPPONENT: 5,
         e.WAITED: -0.001,
         STEP_TOWARD_BFS_COIN: 1/(coin_dist),
-        COIN_DIST_INCREASED: -1/(coin_dist)
+        COIN_DIST_INCREASED: -1/(coin_dist),
+        TAKEN_DANGEROUS_ACTION: -10
 
     }
     reward_sum = 0
