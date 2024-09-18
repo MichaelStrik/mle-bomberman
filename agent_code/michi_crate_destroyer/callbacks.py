@@ -226,7 +226,7 @@ def state_to_features(game_state: dict) -> np.array:
 class Node:
     """
     Class to represent nodes in path-finding algorithms.
-    Any Node has a coordinate, a parent that it precedes and a distance (the amount of steps
+    Any Node has a coordinate, a parent that precedes it and a distance (the amount of steps
     that have been taken to get there).
     """
     def __init__(self, x, y, parent, distance=None):
@@ -286,5 +286,48 @@ def simulate_explosion_map(explosion_map, bombs, k):
     return explosion_map_simulated
 
 
-def bfs_dangerous_steps(start, field, bombs, explosion_map):
+def is_safe(pos, bombs, explosion_map, steps):
     pass
+
+
+def dfs_dangerous_steps(start, field, bombs, explosion_map):
+    """
+
+    Variant of dfs that searches for ways out of dangerous fields.
+
+    :param start:   The position (x,y) from where to start the search with dfs.
+    :param field:   The games's current field.
+    :param bombs:   The bombs that currently lie on the field, including their respective timers.
+    :param explosion_map: The current explosion_map.
+
+    """
+
+    start = Node(start[0], start[1], parent=None, distance=0)
+    stack = [start]
+
+    while stack:
+        # stopping criterion & return TODO include in while condition
+        if False:
+            return None
+
+        v = stack.pop()
+        steps = v.distance # we misuse the distance for a game step counter here
+
+        for dx, dy in [ (0, 0), (-1, 0), (1, 0), (0, 1), (0, -1) ]:
+            nx, ny = v.x + dx, v.y + dy
+            # if position is feasible, push to stack
+            if (    0 <= nx < field.shape[0] 
+                and 0 <= ny < field.shape[1]
+                and field[nx, ny] == 0
+                and is_safe((nx, ny), bombs, explosion_map, steps)  ):
+                stack.append( Node(nx, ny, parent=v, distance=v.distance + 1) )
+
+    
+    return None
+
+
+"""
+plan:
+write is_safe(...), then finish dfs_dangerous_step (give it a better name too)
+
+"""
