@@ -302,16 +302,22 @@ def simulate_explosion_map(explosion_map, bombs, k):
 
     NOTE: the counters in the simulated explosion_map can not guaranteed to be correct
     as a 2 may be overwritten by a 1.
+    NOTE: there is never a 2 in an explosion_map ;(
     """
-    explosion_map_simulated = np.fmax(explosion_map-k, np.zeros_like(explosion_map))
+    if k ==0:
+        return explosion_map
+    elif k >= 1:
+        explosion_map_simulated = np.zeros_like(explosion_map)
+    else:
+        ValueError("Not a valid k.")    
 
     for bomb in bombs:
         timer = bomb[1]
-        if timer-k <= 0:
-            # bomb explodes in the next k steps
+        if timer-k == -1:
+            # bomb exploded in last step, there is an explosion and it will continue in the next step
              x,y = bomb[0]
-             explosion_map_simulated[x,max([y-3,0]):min([y+3+1,s.ROWS])] = max([timer-k+2,0])
-             explosion_map_simulated[max([x-3,0]):min([x+3+1,s.COLS]),y] = max([timer-k+2,0])
+             explosion_map_simulated[x,max([y-3,0]):min([y+3+1,s.ROWS])] = 1
+             explosion_map_simulated[max([x-3,0]):min([x+3+1,s.COLS]),y] = 1
 
     return explosion_map_simulated
 
@@ -322,22 +328,52 @@ def simulate_bombs(bombs, k):
     """
     bombs_simulated = []
     for bomb in bombs:
-        bomb_sim = (bomb[0], max([0, bomb[1]-k])) # reduce bomb timer by k
-        if bomb_sim[1]>0:
+        bomb_sim = (bomb[0], max([-1, bomb[1]-k])) # reduce bomb timer by k
+        if bomb_sim[1] >= 0:
             bombs_simulated.append(bomb_sim)
 
     return bombs_simulated
 
 
-def is_safe(new_pos, explosion_map, bombs, steps, last_pos=None):
+def simulate_explosions(field, explosion_map, bombs, k):
     """
-    Returns True if pos is safe (no explosion at pos) in 'steps' steps taking into account the current explosion_maps
+    Returns an array with values 0 and 1 predicting whether there will be an explosion on the game's 'field' in 'k' steps.
+    The prediction is based on 'explosion_map' and 'bombs' which are assumed to be the explosion_map and bombs in the current step.
+    """
+    explosion_map_k_minus_one = simulate_explosion_map(explosion_map, bombs, k-1) # explosion_map at k-1 steps in the future
+    bombs_k_minus_one = simulate_bombs(bombs, k-1) # bombs at k-1 steps in the future
+
+    # build an array which has value 1 where CURRENTLY (or rather k steps in the future) there is an explosion.
+    # that's completely different that what explosion_map_k represents
+    # note: an explosion will occur where explosion_map_k_minus_one equals 1 
+    # and on the fields and surroundings where a bomb is about about to explode k-1 steps in the future
+    explosions = explosion_map_k_minus_one
+    for bomb in bombs_k_minus_one:
+        if bomb[1] == 0:
+            x, y = bomb[0]
+            explosions[(x,y)] = 1
+            # write surrounding explosion fields, taking into account stone fields
+            if field[(x+1,y)] != -1:
+                explosions[x:x+3+1,y] = 1
+            if field[(x-1,y)] != -1:
+                explosions[x-3:x+1,y] = 1
+            if field[(x,y+1)] != -1:
+                explosions[x,y:y+3+1] = 1
+            if field[(x,y-1)] != -1:
+                explosions[x,y-3:y+1] = 1
+
+    return explosions
+
+
+def is_safe(new_pos, field, explosion_map, bombs, steps, last_pos=None):
+    """
+    Returns True if pos is safe (no explosion at pos) in 'steps' steps, and False otherwise, taking into account the current explosion_maps
     and bombs lying on the field.
-    Also returns False if a field is blocked by a bomb, i.e., the position .
+    Also returns False if a field is blocked by a bomb, i.e., the position can't be walked on.
     """
-    # explosion map
-    explosion_map_simulated = simulate_explosion_map(explosion_map, bombs, steps)
-    no_explosion = not bool(explosion_map_simulated[new_pos])
+    # predict explosions 'steps' steps in the future
+    explosions_steps = simulate_explosions(field, explosion_map, bombs, steps)
+    no_explosion = explosions_steps[new_pos] # will there be an explosion at 'new_pos'?
     # bombs
     bombs_simulated = simulate_bombs(bombs, steps)
     if last_pos is None:
@@ -368,7 +404,7 @@ def dfs_escape_danger(start, field, bombs, explosion_map):
     else:
         last_pos = None
 
-    if not is_safe((start.x, start.y), explosion_map, bombs, start.distance, last_pos=last_pos):
+    if not is_safe((start.x, start.y), field, explosion_map, bombs, start.distance, last_pos=last_pos):
         return None
 
     while stack:
@@ -385,7 +421,7 @@ def dfs_escape_danger(start, field, bombs, explosion_map):
             if (    0 <= nx < field.shape[0] 
                     and 0 <= ny < field.shape[1]
                     and field[nx, ny] == 0
-                    and is_safe((nx, ny), explosion_map, bombs, steps, last_pos=(v.x, v.y))
+                    and is_safe((nx, ny), field, explosion_map, bombs, steps, last_pos=(v.x, v.y))
                     ):
                 stack.append( Node((nx, ny), parent=v, distance=steps+1) )
 
