@@ -337,7 +337,7 @@ def is_safe(new_pos, explosion_map, bombs, steps, last_pos=None):
     """
     # explosion map
     explosion_map_simulated = simulate_explosion_map(explosion_map, bombs, steps)
-    no_explosion = bool(explosion_map_simulated[new_pos])
+    no_explosion = not bool(explosion_map_simulated[new_pos])
     # bombs
     bombs_simulated = simulate_bombs(bombs, steps)
     if last_pos is None:
