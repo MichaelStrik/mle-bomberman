@@ -305,24 +305,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     # NOTE generalization from smaller fields can be implemented here
 
-    # step toward coin found by BFS
-    coin_step_id = old_state[2][0]
-    coin_step_name = Actions(coin_step_id).name
-    if coin_step_name == self_action and e.COIN_COLLECTED not in events:
-        events.append(STEP_TOWARD_BFS_COIN)
-
-    # distance to nearest coin increased
-    coin_dist_old = old_state[2][1]
-    coin_dist_new = new_state[2][1]
-    if coin_dist_new > coin_dist_old and e.COIN_COLLECTED not in events:
-        events.append(COIN_DIST_INCREASED)
-
-    # taken dangerous action
-    dangerous_actions = old_state[3]
-    action_enum = name_to_action_enum(self_action)
-    if action_enum in dangerous_actions:
-        events.append(TAKEN_DANGEROUS_ACTION)
+    custom_events = detect_custom_events(old_state, self_action, new_state)
     
+    events = events + custom_events
+
     # Reward: hand out rewards
     reward = reward_from_events(self, events, old_game_state, new_game_state)
     # self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
@@ -372,7 +358,9 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     last_state = tuple(last_state)
 
 
-    # TODO detect the events here too!
+    custom_events = detect_custom_events(last_state, last_action, None)
+    
+    events = events + custom_events
 
     # NOTE what if state is not existent in q-table yet?
     # do we fill the initial q-table with random values or zeros?
@@ -386,6 +374,30 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     with open("my-saved-model.pt", "wb") as file:
         pickle.dump(self.q_table, file)
+
+
+def detect_custom_events(old_state, self_action, new_state):
+    events = []
+    # step toward coin found by BFS
+    coin_step_id = old_state[2][0]
+    coin_step_name = Actions(coin_step_id).name
+    if coin_step_name == self_action and e.COIN_COLLECTED not in events:
+        events.append(STEP_TOWARD_BFS_COIN)
+
+    # distance to nearest coin increased
+    if new_state is not None:
+        coin_dist_old = old_state[2][1]
+        coin_dist_new = new_state[2][1]
+        if coin_dist_new > coin_dist_old and e.COIN_COLLECTED not in events:
+            events.append(COIN_DIST_INCREASED)
+
+    # taken dangerous action
+    dangerous_actions = old_state[3]
+    action_enum = name_to_action_enum(self_action)
+    if action_enum in dangerous_actions:
+        events.append(TAKEN_DANGEROUS_ACTION)
+
+    return events
 
 
 def reward_from_events(self, events: List[str], old_game_state, new_game_state) -> int:
