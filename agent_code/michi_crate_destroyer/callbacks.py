@@ -373,7 +373,7 @@ def is_safe(new_pos, field, explosion_map, bombs, steps, last_pos=None):
     """
     # predict explosions 'steps' steps in the future
     explosions_steps = simulate_explosions(field, explosion_map, bombs, steps)
-    no_explosion = explosions_steps[new_pos] # will there be an explosion at 'new_pos'?
+    no_explosion = not explosions_steps[new_pos] # will there be an explosion at 'new_pos'?
     # bombs
     bombs_simulated = simulate_bombs(bombs, steps)
     if last_pos is None:
@@ -434,7 +434,7 @@ def bomb_is_safe(pos, field, bombs, explosion_map):
     It does so by searching for escapes with dfs_escape_danger(...).
     """
     bombs_new = copy.copy(bombs)
-    bombs_new.append((pos, 3))
+    bombs_new.append((pos, 2))
     start = Node(pos, parent=None, distance=1)
     
     return bool(dfs_escape_danger(start, field, bombs_new, explosion_map))

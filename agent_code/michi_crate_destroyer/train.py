@@ -371,6 +371,9 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     last_state = state_to_features(last_game_state)
     last_state = tuple(last_state)
 
+
+    # TODO detect the events here too!
+
     # NOTE what if state is not existent in q-table yet?
     # do we fill the initial q-table with random values or zeros?
     # (we probably don't actually want to fill the q_table variable for memory reasons)
