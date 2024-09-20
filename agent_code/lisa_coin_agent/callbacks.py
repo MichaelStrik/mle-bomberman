@@ -31,11 +31,7 @@ def setup(self):
         self.q_table = {}
         self.logger.info("No saved model found. Starting with an empty Q-table.")
     
-    self.alpha = 0.3
-    self.gamma = 0.9
-    self.epsilon = 1.0
-    self.epsilon_decay = 0.95
-    self.epsilon_min = 0.1
+    self.epsilon = 0.1
 
     
 def act(self, game_state: dict) -> str:
@@ -47,20 +43,23 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    # Exploration vs exploitation
     features = state_to_features(game_state)
     state = tuple(features)
 
+    # Q-Table
     if state not in self.q_table:
         self.q_table[state] = np.zeros(len(ACTIONS))
-    
+    q_values = self.q_table[state]
+
     valid_actions = get_valid_actions(game_state)
 
-    self.logger.debug("Querying Q-table for action.")
-    q_values = self.q_table[state]
-    valid_q_values = [q_values[ACTIONS.index(action)] for action in valid_actions]
-    action = valid_actions[np.argmax(valid_q_values)]
-    
+    # Exploration vs Exploitation
+    if np.random.rand() < self.epsilon:
+        action = np.random.choice(valid_actions)
+    else:
+        valid_q_values = [q_values[ACTIONS.index(action)] for action in valid_actions]
+        action = valid_actions[np.argmax(valid_q_values)]
+
     return action
 
 
@@ -78,6 +77,7 @@ def state_to_features(game_state: dict) -> np.array:
     :param game_state:  A dictionary describing the current game board.
     :return: np.array
     """
+
     if game_state is None:
         return None
 

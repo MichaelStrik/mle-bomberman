@@ -1,7 +1,7 @@
 import pickle
 import os
 import numpy as np
-from .callbacks import state_to_features
+from .callbacks import state_to_features, get_valid_actions
 import events as e
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
@@ -13,13 +13,19 @@ def setup_training(self):
     
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.logger.info("Setting up training variables.")
-    # Q-table initialisieren
-    self.q_table = {}
-    self.alpha = 0.1  # Lernrate siehe SARSA ALg.
-    self.gamma = 0.9  # Diskontfaktor siehe SARSA Alg.
-    self.epsilon = 1.0  # Epsilon für epsilon-greedy
-    self.epsilon_decay = 0.95  # Epsilon-Decay für Exploration-Exploitation Tradeoff
+    # Check whether a saved Q-table exists
+    if os.path.isfile("my-sarsa-model.pt"):
+        with open("my-sarsa-model.pt", "rb") as file:
+            self.q_table = pickle.load(file)
+        self.logger.info("Loaded Q-table from my-sarsa-model.pt")
+    else:
+        self.q_table = {}
+        self.logger.info("No saved model found. Starting with an empty Q-table.")
+    
+    self.alpha = 0.3
+    self.gamma = 0.9
+    self.epsilon = 1.0
+    self.epsilon_decay = 0.95
     self.epsilon_min = 0.1
         
     self.last_positions = []
@@ -59,36 +65,39 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     action_idx = ACTIONS.index(self_action)
     
-    # Bewegung erkennen
+    # Save position and action
     current_position = new_game_state['self'][3]
-    if len(self.last_positions) >= 3 and current_position in self.last_positions[-2:]:
-        events.append("STUCK_IN_LOOP")
-    
-    # Position und Aktion speichern
     self.last_positions.append(current_position)
     self.last_actions.append(self_action)
 
-    # Positionen in den letzten Zügen erkennen
-    if len(self.last_positions) >= 3:
-        if current_position == self.last_positions[-2]:
-            self.q_table[old_state][action_idx] -= 0.5  # Q-Wert verringern, wenn zur vorherigen Position zurückgekehrt wird
+    # Recognize whether it wiggles back and forth
+    if len(self.last_positions) >= 4:
+        if self.last_positions[-1] == self.last_positions[-3] and self.last_positions[-2] == self.last_positions[-4]:
+            events.append("STUCK_IN_LOOP")
 
-    # Maximale Länge des Verlaufs begrenzen
-    if len(self.last_positions) > 4:
+    # Limit the maximum length of the history of the last positions and actions
+    if len(self.last_positions) > 5:
         self.last_positions.pop(0)
         self.last_actions.pop(0)
 
-    # Reward, jetzt mit alten und neuen Zuständen
+    # Reward
     reward = reward_from_events(self, events, old_game_state, new_game_state)
 
-    # SARSA Update-Regel !!!
-    if new_game_state is not None:
-        next_action = np.argmax(self.q_table[new_state])
-        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                              self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
+    # valid actions
+    valid_actions = get_valid_actions(new_game_state)
+       
+    # Exploration vs Exploitation
+    if np.random.rand() < self.epsilon:
+        action = np.random.choice(valid_actions)
     else:
-        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                              self.alpha * (reward - self.q_table[old_state][action_idx])
+        # SARSA Update-Regel / Epsilon-greedy
+        if new_game_state is not None:
+            next_action = np.argmax(self.q_table[new_state])
+            self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
+                                                self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
+        else:
+            self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
+                                                self.alpha * (reward - self.q_table[old_state][action_idx])
 
     # Epsilon-Decay
     if self.epsilon > self.epsilon_min:
@@ -155,21 +164,23 @@ def reward_from_events(self, events: list[str], old_game_state: dict, new_game_s
 
     reward_sum = sum([game_rewards.get(event, 0) for event in events])
     
-    # Zusätzliche Belohnung basierend auf der Annäherung an Münzen
     if old_game_state is not None and new_game_state is not None:
-        old_position = old_game_state['self'][3]
-        new_position = new_game_state['self'][3]
+        old_features = state_to_features(old_game_state)
+        new_features = state_to_features(new_game_state)
 
-        if new_game_state['coins']:
-            old_min_dist = min([np.linalg.norm(np.array(old_position) - np.array(coin)) for coin in old_game_state['coins']])
-            new_min_dist = min([np.linalg.norm(np.array(new_position) - np.array(coin)) for coin in new_game_state['coins']])
+        if old_features is not None and new_features is not None:
+            # Distance to coins 
+            old_min_distance = old_features[2]  
+            new_min_distance = new_features[2]  
 
-            # Belohnung für Annäherung an die nächste Münze
-            if new_min_dist < old_min_dist:
+            # Reward if closer to coin 
+            if new_min_distance < old_min_distance:
                 reward_sum += 0.5
-        else:
-            # Falls keine Münzen mehr vorhanden sind, kann man eine alternative Belohnung in Erwägung ziehen
-            reward_sum += 0.1  # Zum Beispiel eine kleine Belohnung, da alle Münzen eingesammelt wurden
+            elif new_min_distance == old_min_distance:
+                reward_sum -= 0.05  
+            else:
+                reward_sum -= 0.5  
 
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
+
     return reward_sum
