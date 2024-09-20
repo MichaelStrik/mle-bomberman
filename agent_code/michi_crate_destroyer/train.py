@@ -28,7 +28,7 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 # hyperparameters
 GAMMA = 0.6
 ALPHA = 0.3
-EPSILON = 0.4
+EPSILON = 0.1
 EPSILON_DECAY = 0.995
 ALPHA_DECAY = 1.0 # alpha is constant
 EPSILON_MIN = 0.0 # not in use

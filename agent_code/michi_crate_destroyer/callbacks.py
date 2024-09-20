@@ -55,52 +55,6 @@ def setup(self):
     self.epsilon_min = 0.1  # minimum exploration probability
     
 
-def find_crates(game_state):
-    """
-    Findet alle Kisten auf dem Spielfeld und gibt deren Positionen zurück.
-
-    :param game_state: Das aktuelle Spielzustand-Dictionary.
-    :return: Eine Liste von Tupeln mit den Positionen der Kisten.
-    """
-    crates = []
-    field = game_state['field']  # Das Spielfeld
-    for x in range(field.shape[0]):
-        for y in range(field.shape[1]):
-            if field[x, y] == 1:  # 1 steht normalerweise für eine Kiste
-                crates.append((x, y))
-    return crates
-
-
-def get_valid_actions(game_state: dict) -> list:
-    """
-    """
-    
-    x, y = game_state['self'][3]
-    field = game_state['field']
-    bombs = game_state['bombs']
-
-    valid_actions = ['WAIT']
-
-    directions = {
-        'UP': (x, y - 1),
-        'RIGHT': (x + 1, y),
-        'DOWN': (x, y + 1),
-        'LEFT': (x - 1, y)
-    }
-
-    # Verfügbarkeit der Richtungen überprüfen
-    for action, (nx, ny) in directions.items():
-        if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
-            if field[nx, ny] == 0 and not any(bomb[0] == (nx, ny) for bomb in bombs):  # Kein Hindernis und keine Bombe
-                valid_actions.append(action)
-    
-    # dropping bomb possible?
-    if game_state['self'][2]:
-        valid_actions.append('BOMB')
-
-    return valid_actions
-
-
 def act(self, game_state: dict) -> str:
     """
     Your agent should parse the input, think, and take a decision.
@@ -119,7 +73,9 @@ def act(self, game_state: dict) -> str:
     else:
         q_values = np.zeros(len(ACTIONS))
 
-    valid_actions = get_valid_actions(game_state)
+    self_pos = game_state['self'][3]
+    can_drop_bomb = game_state['self'][2]
+    valid_actions = get_valid_actions(self_pos, can_drop_bomb, game_state['field'], game_state['bombs'])
 
     # choose action
     if self.train:
@@ -149,6 +105,50 @@ def act(self, game_state: dict) -> str:
 
 
     return action
+
+
+def find_crates(game_state):
+    """
+    Findet alle Kisten auf dem Spielfeld und gibt deren Positionen zurück.
+
+    :param game_state: Das aktuelle Spielzustand-Dictionary.
+    :return: Eine Liste von Tupeln mit den Positionen der Kisten.
+    """
+    crates = []
+    field = game_state['field']  # Das Spielfeld
+    for x in range(field.shape[0]):
+        for y in range(field.shape[1]):
+            if field[x, y] == 1:  # 1 steht normalerweise für eine Kiste
+                crates.append((x, y))
+    return crates
+
+
+def get_valid_actions(pos, can_drop_bomb, field, bombs) -> list:
+    """
+    """
+    
+    x, y = pos
+
+    valid_actions = ['WAIT']
+
+    directions = {
+        'UP': (x, y - 1),
+        'RIGHT': (x + 1, y),
+        'DOWN': (x, y + 1),
+        'LEFT': (x - 1, y)
+    }
+
+    # Verfügbarkeit der Richtungen überprüfen
+    for action, (nx, ny) in directions.items():
+        if 0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]:
+            if field[nx, ny] == 0 and not any(bomb[0] == (nx, ny) for bomb in bombs):  # Kein Hindernis und keine Bombe
+                valid_actions.append(action)
+    
+    # dropping bomb possible?
+    if can_drop_bomb:
+        valid_actions.append('BOMB')
+
+    return valid_actions
 
 
 def get_env5x5_field(pos, field) -> tuple:
@@ -242,7 +242,8 @@ def state_to_features(game_state: dict) -> list:
                         # for action WAIT (reward decays with dist)
 
     # dangerous steps (where there will be no escape from explosions)
-    dangerous_actions = identify_dangerous_actions(pos, game_state['field'], game_state['bombs'], game_state['explosion_map'])
+    can_drop_bomb = game_state['self'][2]
+    dangerous_actions = identify_dangerous_actions(pos, can_drop_bomb, game_state['field'], game_state['bombs'], game_state['explosion_map'])
     
     # that's it for now
     channels = [env5x5_field, env5x5_coins, (coin_step, dist), dangerous_actions]
@@ -440,7 +441,7 @@ def bomb_is_safe(pos, field, bombs, explosion_map):
     return bool(dfs_escape_danger(start, field, bombs_new, explosion_map))
 
 
-def identify_dangerous_actions(pos, field, bombs, explosion_map):
+def identify_dangerous_actions(pos, can_drop_bomb, field, bombs, explosion_map):
     # identify dangerous steps
     steps_dangerous = []
     for step in [(0,0), (-1,0), (0,-1), (1,0), (0,1)]:
@@ -459,11 +460,13 @@ def identify_dangerous_actions(pos, field, bombs, explosion_map):
     bomb_safe = bomb_is_safe(pos, field, bombs, explosion_map)
     
     # encode information
+    valid_actions = get_valid_actions(pos, can_drop_bomb, field, bombs)
     steps_dangerous_encoded = []
     for step in steps_dangerous:
         name = VEC_TO_DIR[step]
-        action_enum = name_to_action_enum(name)
-        steps_dangerous_encoded.append(action_enum)
+        if name in valid_actions:
+            action_enum = name_to_action_enum(name)
+            steps_dangerous_encoded.append(action_enum)
     if not bomb_safe:
         steps_dangerous_encoded.append(name_to_action_enum('BOMB'))
 
