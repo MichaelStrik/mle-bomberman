@@ -296,17 +296,16 @@ def bfs_coin(start, field, coins) -> Node | None :
     return None
 
 
-def simulate_explosion_map(explosion_map, bombs, k):
+def simulate_explosion_map(field, explosion_map, bombs, k):
     """
     Simulates how explosion_map would look like in 'k' steps taking into account
     the current explosion_map and the current placed bombs.
 
-    NOTE: the counters in the simulated explosion_map can not guaranteed to be correct
-    as a 2 may be overwritten by a 1.
+    NOTE: simulate_explosion_map
     NOTE: there is never a 2 in an explosion_map ;(
     """
     if k ==0:
-        return explosion_map
+        return copy.copy(explosion_map)
     elif k >= 1:
         explosion_map_simulated = np.zeros_like(explosion_map)
     else:
@@ -316,21 +315,28 @@ def simulate_explosion_map(explosion_map, bombs, k):
         timer = bomb[1]
         if timer-k == -1:
             # bomb exploded in last step, there is an explosion and it will continue in the next step
-             x,y = bomb[0]
-             explosion_map_simulated[x,max([y-3,0]):min([y+3+1,s.ROWS])] = 1
-             explosion_map_simulated[max([x-3,0]):min([x+3+1,s.COLS]),y] = 1
-
+            x,y = bomb[0]
+            if field[(x+1,y)] != -1:
+                explosion_map_simulated[x:min(x+3+1,s.COLS),y] = 1
+            if field[(x-1,y)] != -1:
+                explosion_map_simulated[max(x-3,0):x+1,y] = 1
+            if field[(x,y+1)] != -1:
+                explosion_map_simulated[x,y:min(y+3+1,s.COLS)] = 1
+            if field[(x,y-1)] != -1:
+                explosion_map_simulated[x,max(y-3,0):y+1] = 1
+            
     return explosion_map_simulated
 
 
 def simulate_bombs(bombs, k):
     """
     Same as simulate_explosion_map, just for bombs.
+    Bombs are taken out when their timer would fall below -2 after the 'k' steps.
     """
     bombs_simulated = []
     for bomb in bombs:
-        bomb_sim = (bomb[0], max([-1, bomb[1]-k])) # reduce bomb timer by k
-        if bomb_sim[1] >= 0:
+        bomb_sim = (bomb[0], max([-2, bomb[1]-k])) # reduce bomb timer by k
+        if bomb_sim[1] >= -2:
             bombs_simulated.append(bomb_sim)
 
     return bombs_simulated
@@ -341,7 +347,7 @@ def simulate_explosions(field, explosion_map, bombs, k):
     Returns an array with values 0 and 1 predicting whether there will be an explosion on the game's 'field' in 'k' steps.
     The prediction is based on 'explosion_map' and 'bombs' which are assumed to be the explosion_map and bombs in the current step.
     """
-    explosion_map_k_minus_one = simulate_explosion_map(explosion_map, bombs, k-1) # explosion_map at k-1 steps in the future
+    explosion_map_k_minus_one = simulate_explosion_map(field, explosion_map, bombs, k-1) # explosion_map at k-1 steps in the future
     bombs_k_minus_one = simulate_bombs(bombs, k-1) # bombs at k-1 steps in the future
 
     # build an array which has value 1 where CURRENTLY (or rather k steps in the future) there is an explosion.
@@ -350,18 +356,18 @@ def simulate_explosions(field, explosion_map, bombs, k):
     # and on the fields and surroundings where a bomb is about about to explode k-1 steps in the future
     explosions = explosion_map_k_minus_one
     for bomb in bombs_k_minus_one:
-        if bomb[1] == 0:
+        if bomb[1] == 0 or bomb[1] == -1:
             x, y = bomb[0]
             explosions[(x,y)] = 1
             # write surrounding explosion fields, taking into account stone fields
             if field[(x+1,y)] != -1:
-                explosions[x:x+3+1,y] = 1
+                explosions[x:min(x+3+1, s.COLS),y] = 1
             if field[(x-1,y)] != -1:
-                explosions[x-3:x+1,y] = 1
+                explosions[max(x-3,0):x+1,y] = 1
             if field[(x,y+1)] != -1:
-                explosions[x,y:y+3+1] = 1
+                explosions[x,y:min(y+3+1, s.COLS)] = 1
             if field[(x,y-1)] != -1:
-                explosions[x,y-3:y+1] = 1
+                explosions[x,max(y-3,0):y+1] = 1
 
     return explosions
 
@@ -399,12 +405,13 @@ def dfs_escape_danger(start, field, bombs, explosion_map):
 
     stack = [start]
 
-    # was start an explosion-free position in the first place?
+    # do we start on a bomb?
     if any((start.x, start.y) == bomb[0] for bomb in simulate_bombs(bombs, start.distance)):
         last_pos = (start.x, start.y)
     else:
         last_pos = None
 
+    # was start an explosion-free position in the first place?
     if not is_safe((start.x, start.y), field, explosion_map, bombs, start.distance, last_pos=last_pos):
         return None
 
@@ -412,7 +419,7 @@ def dfs_escape_danger(start, field, bombs, explosion_map):
         v = stack.pop()
         steps = v.distance # we misuse the distance for a game step counter here
 
-        if steps>=4:
+        if steps>=5:
             # after 4 steps, no new explosion fields add and we have found a safe way
             return v
 
@@ -422,7 +429,8 @@ def dfs_escape_danger(start, field, bombs, explosion_map):
             if (    0 <= nx < field.shape[0] 
                     and 0 <= ny < field.shape[1]
                     and field[nx, ny] == 0
-                    and is_safe((nx, ny), field, explosion_map, bombs, steps, last_pos=(v.x, v.y))
+                    # is position safe and not blocked by a bomb? (exception: we already stand on that bomb)
+                    and is_safe((nx, ny), field, explosion_map, bombs, steps+1, last_pos=(v.x, v.y))
                     ):
                 stack.append( Node((nx, ny), parent=v, distance=steps+1) )
 
@@ -435,7 +443,7 @@ def bomb_is_safe(pos, field, bombs, explosion_map):
     It does so by searching for escapes with dfs_escape_danger(...).
     """
     bombs_new = copy.copy(bombs)
-    bombs_new.append((pos, 2))
+    bombs_new.append((pos, 4))
     start = Node(pos, parent=None, distance=1)
     
     return bool(dfs_escape_danger(start, field, bombs_new, explosion_map))
@@ -450,9 +458,8 @@ def identify_dangerous_actions(pos, can_drop_bomb, field, bombs, explosion_map):
         if not (0 <= start_pos[0] < field.shape[0] 
                 and 0 <= start_pos[1] < field.shape[1]
                 and field[start_pos] == 0
-                and not any(start_pos == bomb[0] for bomb in bombs if bomb[0]==pos)):
+                and not any(start_pos == bomb[0] for bomb in bombs if not bomb[0]==pos)):
             continue
-        # TODO check if we can take that step in the first place
         start = Node(start_pos, parent=None, distance=1)
         if dfs_escape_danger(start, field, bombs, explosion_map) is None:
             steps_dangerous.append(step)
