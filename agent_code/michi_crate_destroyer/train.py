@@ -423,26 +423,26 @@ def detect_custom_events(old_state, self_action, new_state):
     #bomb placed next to crate
     if self_action=='BOMB':
         crate_count=0
-        for tile in old_state[0]:
-            if tile==1:
-                crate_count+=1
+        # for tile in old_state[0]:
+        #     if tile==1:
+        #         crate_count+=1
         
-        #if old_state[0][14]==1:
-        #    crate_count+=1
-        #    if old_state[0][15]==1:
-        #        crate_count+=1
-        #if old_state[0][18]==1:
-        #    crate_count+=1
-        #    if old_state[0][23]==1:
-        #        crate_count+=1
-        #if old_state[0][12]==1:
-        #    crate_count+=1
-        #    if old_state[0][11]==1:
-        #        crate_count+=1
-        #if old_state[0][8]==1:
-        #    crate_count+=1
-        #    if old_state[0][3]==1:
-        #        crate_count+=1
+        if old_state[0][10]==1:
+            crate_count+=1
+            if old_state[0][11]==1:
+                crate_count+=1
+        if old_state[0][13]==1:
+            crate_count+=1
+            if old_state[0][14]==1:
+                crate_count+=1
+        if old_state[0][2]==1:
+            crate_count+=1
+            if old_state[0][7]==1:
+                crate_count+=1
+        if old_state[0][17]==1:
+            crate_count+=1
+            if old_state[0][22]==1:
+                crate_count+=1
         if crate_count == 0:
             events.append(USELESS_BOMB)
         if crate_count >= 1 and crate_count <= 2:
