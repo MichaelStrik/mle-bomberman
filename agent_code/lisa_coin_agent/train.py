@@ -26,7 +26,7 @@ def setup_training(self):
     self.gamma = 0.9
     self.epsilon = 1.0
     self.epsilon_decay = 0.95
-    self.epsilon_min = 0.1
+    self.epsilon_min = 0.2
         
     self.last_positions = []
     self.last_actions = []
@@ -83,25 +83,16 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Reward
     reward = reward_from_events(self, events, old_game_state, new_game_state)
 
-    # valid actions
-    valid_actions = get_valid_actions(new_game_state)
-       
-    # Exploration vs Exploitation
-    if np.random.rand() < self.epsilon:
-        action = np.random.choice(valid_actions)
+    # SARSA Update-Regel
+    if new_game_state is not None:
+        next_action = np.argmax(self.q_table[new_state])
+        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
+                                            self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
     else:
-        # SARSA Update-Regel / Epsilon-greedy
-        if new_game_state is not None:
-            next_action = np.argmax(self.q_table[new_state])
-            self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                                self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
-        else:
-            self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-                                                self.alpha * (reward - self.q_table[old_state][action_idx])
+        self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
+                                            self.alpha * (reward - self.q_table[old_state][action_idx])
 
-    # Epsilon-Decay
-    if self.epsilon > self.epsilon_min:
-        self.epsilon *= self.epsilon_decay
+
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: list[str]):

@@ -21,17 +21,18 @@ def setup(self):
     """
     self.logger.info("Setting up agent from saved state.")
     
-    # Prüfen, ob eine gespeicherte Q-Tabelle vorhanden ist
+    # Check whether a saved Q-table exists
     if os.path.isfile("my-sarsa-model.pt"):
         with open("my-sarsa-model.pt", "rb") as file:
             self.q_table = pickle.load(file)
         self.logger.info("Loaded Q-table from my-sarsa-model.pt")
     else:
-        # Falls keine gespeicherte Q-Tabelle vorhanden ist, initialisieren wir sie leer.
         self.q_table = {}
         self.logger.info("No saved model found. Starting with an empty Q-table.")
     
-    self.epsilon = 0.1
+    self.epsilon = 0.2
+    self.epsilon_decay = 1.0
+    self.epsilon_min = 0.1
 
     
 def act(self, game_state: dict) -> str:
@@ -59,6 +60,10 @@ def act(self, game_state: dict) -> str:
     else:
         valid_q_values = [q_values[ACTIONS.index(action)] for action in valid_actions]
         action = valid_actions[np.argmax(valid_q_values)]
+    
+    # Epsilon-Decay
+    if self.epsilon > self.epsilon_min:
+        self.epsilon *= self.epsilon_decay
 
     return action
 
@@ -124,9 +129,8 @@ def get_valid_actions(game_state):
 
 def bfs(field, start, target):
     """
-    Breadth-First Search (BFS): Algorithmus, um den kürzesten Weg von einem Startpunkt zu einem Zielpunkt
-    in einem Gitterfeld zu finden. BFS ist eine Suchstrategie, die systematisch alle Knoten in einer Graphstruktur durchsucht, 
-    indem sie die nächstgelegenen Knoten zuerst besucht. 
+    Breadth-First Search (BFS): Algorithm for finding the shortest path 
+    from a starting point to a target point in a grid field.
     """
     queue = deque([(start, 0)])
     visited = set()

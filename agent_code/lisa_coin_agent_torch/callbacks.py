@@ -24,26 +24,36 @@ class QNetwork(nn.Module):
 def setup(self):
     """
     Setup your code. This is called once when loading each agent.
+    Make sure that you prepare everything such that act(...) can be called.
+
+    When in training mode, the separate `setup_training` in train.py is called
+    after this method. This separation allows you to share your trained agent
+    with other students, without revealing your training code.
+
+    In this example, our model is a set of probabilities over actions
+    that are is independent of the game state.
+
+    :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     self.logger.info("Setting up agent with Deep Q-Learning.")
-    
-    # Hyperparameter
+
+    # Parameter
     self.alpha = 0.001  # Lernrate für Adam-Optimizer
     self.gamma = 0.99  # Diskontfaktor
-    self.epsilon = 0.2  # Epsilon für epsilon-greedy
+    self.epsilon = 0.2  # for epsilon-greedy
     self.epsilon_decay = 0.995
     self.epsilon_min = 0.1
     self.batch_size = 64
     self.memory = deque(maxlen=10000)
     
-    # Netzwerke initialisieren
-    self.q_network = QNetwork(input_dim=3, output_dim=len(ACTIONS))  # Annahme: 3 Features aus `state_to_features`
+    # Initialize networks
+    self.q_network = QNetwork(input_dim=3, output_dim=len(ACTIONS))  # 3 Features in  `state_to_features`
     self.target_network = QNetwork(input_dim=3, output_dim=len(ACTIONS))
     self.target_network.load_state_dict(self.q_network.state_dict())
     self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.alpha)
     self.loss_fn = nn.MSELoss()
     
-    # Prüfen, ob ein gespeichertes Modell vorhanden ist
+    # Check whether a saved Q-table exists
     if os.path.isfile("dqn-model.pth"):
         self.q_network.load_state_dict(torch.load("dqn-model.pth"))
         self.target_network.load_state_dict(torch.load("dqn-model.pth"))
@@ -51,9 +61,16 @@ def setup(self):
     else:
         self.logger.info("No saved model found. Starting with a new Q-network.")
 
+    
+
 def act(self, game_state: dict) -> str:
     """
-    The agent decides on an action based on the current state.
+    Your agent should parse the input, think, and take a decision.
+    When not in training mode, the maximum execution time for this method is 0.5s.
+
+    :param self: The same object that is passed to all of your callbacks.
+    :param game_state: The dictionary that describes everything on the board.
+    :return: The action to take as a string.
     """
     state = torch.tensor(state_to_features(game_state), dtype=torch.float32).unsqueeze(0)
 
@@ -72,8 +89,17 @@ def act(self, game_state: dict) -> str:
 
 def state_to_features(game_state: dict) -> np.array:
     """
+    *This is not a required function, but an idea to structure your code.*
+
     Converts the game state to the input of your model, i.e.
     a feature vector.
+
+    You can find out about the state of the game environment via game_state,
+    which is a dictionary. Consult 'get_state_for_agent' in environment.py to see
+    what it contains.
+
+    :param game_state:  A dictionary describing the current game board.
+    :return: np.array
     """
     if game_state is None:
         return None
@@ -121,8 +147,8 @@ def get_valid_actions(game_state):
 
 def bfs(field, start, target):
     """
-    Breadth-First Search (BFS): Algorithmus, um den kürzesten Weg von einem Startpunkt zu einem Zielpunkt
-    in einem Gitterfeld zu finden.
+    Breadth-First Search (BFS): Algorithm for finding the shortest path 
+    from a starting point to a target point in a grid field.
     """
     queue = deque([(start, 0)])
     visited = set()
