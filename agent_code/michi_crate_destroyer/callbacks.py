@@ -241,12 +241,41 @@ def state_to_features(game_state: dict) -> list:
         dist = np.inf   # set dist=inf so that no reward is given 
                         # for action WAIT (reward decays with dist)
 
+    # nearest reachable field next to crate
+    # nearest reachable coin
+    node = bfs_crate(pos, game_state['field'])
+    dir_enum = Actions(5) # to encode direction
+    if node is not None and node.parent is not None:
+        # store distance to coin
+        crate_dist = node.distance
+
+        # recurse back to the first step taken
+        while (node.parent.x, node.parent.y) != pos:
+            node = node.parent
+        crate_dir = (node.x-pos[0], node.y-pos[1])
+        
+        crate_dir_name = VEC_TO_DIR[crate_dir]
+        crate_dir_id = name_to_action_enum(crate_dir_name)
+        
+    else:
+        crate_dir_id = name_to_action_enum('WAIT')
+        crate_dist = np.inf   # set dist=inf so that no reward is given 
+                        # for action WAIT (reward decays with dist)
+    
+
+    # bombs around agent
+    crate_counter_5x5 = 0
+    for tile in env5x5_field:
+        if tile == 1:
+            crate_counter_5x5 += 1
+
+
     # dangerous steps (where there will be no escape from explosions)
     can_drop_bomb = game_state['self'][2]
     dangerous_actions = identify_dangerous_actions(pos, can_drop_bomb, game_state['field'], game_state['bombs'], game_state['explosion_map'])
     
     # that's it for now
-    channels = [env5x5_field, env5x5_coins, (coin_step, dist), dangerous_actions]
+    channels = [env5x5_field, env5x5_coins, (coin_step, dist), dangerous_actions, (crate_dir_id, crate_dist, crate_counter_5x5)]
     
     return channels
 
@@ -290,6 +319,38 @@ def bfs_coin(start, field, coins) -> Node | None :
             nx, ny = v.x + dx, v.y + dy
             if (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]
                     and field[nx, ny] == 0 and (nx, ny) not in visited):
+                queue.append( Node((nx, ny), parent=v, distance=v.distance + 1) )
+                visited.add( (nx, ny) )
+    
+    return None
+
+
+def bfs_crate(start, field) -> Node | None :
+    """
+    Variant of bfs that searches for coins.
+    If any coin can be reached, a Node object containing the coin's position (x, y)
+    and other useful information.
+    Returns None if no coin can be reached.
+
+    :param start:   The position (x,y) from where to start the search with bfs.
+    :param field:   The games's current field.
+    :param coins:   The coordinates of all coins that currently lay on the field.
+    """
+
+    start = Node(start, parent=None, distance=0)
+    queue = deque([start])
+    visited = set()
+    visited.add( (start.x, start.y) )
+
+    while queue:
+        v = queue.popleft()
+        
+        for dx, dy in [(-1, 0), (1, 0), (0, 1), (0, -1)]:
+            nx, ny = v.x + dx, v.y + dy
+            if (0 <= nx < field.shape[0] and 0 <= ny < field.shape[1]
+                    and field[nx, ny] == 0 and (nx, ny) not in visited):
+                if field[(nx,ny)] == 1:
+                    return v
                 queue.append( Node((nx, ny), parent=v, distance=v.distance + 1) )
                 visited.add( (nx, ny) )
     
