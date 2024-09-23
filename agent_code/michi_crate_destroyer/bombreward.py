@@ -21,12 +21,9 @@ PLACEHOLDER_EVENT = "PLACEHOLDER"
 STEP_TOWARD_BFS_COIN = "STEP_TOWARD_BFS_COIN"
 COIN_DIST_INCREASED = "COIN_DIST_INCREASED"
 TAKEN_DANGEROUS_ACTION = "TAKEN_DANGEROUS_ACTION"
-TAKEN_SAFE_ACTION = "TAKEN_SAFE_ACTION"
 USELESS_BOMB='USELESS_BOMB'
 GOOD_BOMB='GOOD_BOMB'
 VERY_GOOD_BOMB='VERY_GOOD_BOMB'
-STEP_TOWARD_BFS_CRATE = 'STEP_TOWARD_BFS_CRATE'
-CRATE_DIST_INCREASED = 'CRATE_DIST_INCREASED'
 
 # Actions
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
@@ -34,10 +31,10 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 # hyperparameters
 GAMMA = 0.6
 ALPHA = 0.3
-EPSILON = 0.5
-EPSILON_DECAY = 0.999
+EPSILON = 0.35
+EPSILON_DECAY = 0.996
 ALPHA_DECAY = 1.0 # alpha is constant
-EPSILON_MIN = 0.1 # not in use
+EPSILON_MIN = 0.0 # not in use
 
 def setup_training(self):
     """
@@ -61,6 +58,8 @@ def setup_training(self):
         with open("my-saved-model.pt", "rb") as file:
             self.q_table = pickle.load(file)
 
+    self.stats=[]
+    
     # parameters, info
     self.round = 0
     self.alpha = ALPHA  # Lernrate davor 0.1
@@ -356,7 +355,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
     # self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
     self.round += 1
-    self.epsilon = max([self.epsilon*self.epsilon_decay, self.epsilon_min])
+    self.epsilon *= self.epsilon_decay
     self.alpha   *= self.alpha_decay
     # self.epsilon = self.epsilon*self.round/(self.round+1)
 
@@ -377,9 +376,21 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     # End of round Q-Update
     update_q_table(self, None, last_action, last_state, reward)
+    
+    #self.stats=[]
+    self.stats.append(last_game_state['step'])
 
     with open("my-saved-model.pt", "wb") as file:
         pickle.dump(self.q_table, file)
+    
+    if not os.path.isfile("stats.txt"):
+        self.logger.info("new stats.")
+        with open('stats.txt', 'w') as file:
+            file.write('%s' % self.stats)
+    else:
+        self.logger.info("Continuing stats.")
+        with open('stats.txt', 'a') as file:
+            file.write('%s' % self.stats)
 
 
 def detect_custom_events(old_state, self_action, new_state):
@@ -397,60 +408,38 @@ def detect_custom_events(old_state, self_action, new_state):
         if coin_dist_new > coin_dist_old and e.COIN_COLLECTED not in events:
             events.append(COIN_DIST_INCREASED)
 
-    # step toward crate found by BFS
-    crate_step_id = old_state[4][0]
-    crate_step_name = Actions(crate_step_id).name
-    if crate_step_name == self_action:
-        events.append(STEP_TOWARD_BFS_CRATE)
-
-    # distance to nearest crate increased
-    if new_state is not None:
-        crate_dist_old = old_state[4][1]
-        crate_dist_new = new_state[4][1]
-        if crate_dist_new > crate_dist_old:
-            events.append(CRATE_DIST_INCREASED)
-
     # taken dangerous action
     dangerous_actions = old_state[3]
     action_enum = name_to_action_enum(self_action)
     if action_enum in dangerous_actions:
         events.append(TAKEN_DANGEROUS_ACTION)
 
-    # taken safe action
-    if action_enum not in dangerous_actions:
-        events.append(TAKEN_SAFE_ACTION)
-
     #bomb placed next to crate
     if self_action=='BOMB':
         crate_count=0
-        # for tile in old_state[0]:
-        #     if tile==1:
-        #         crate_count+=1
-        
-        if old_state[0][10]==1:
+        if old_state[0][14]==1:
+            crate_count+=1
+            if old_state[0][15]==1:
+                crate_count+=1
+        if old_state[0][18]==1:
+            crate_count+=1
+            if old_state[0][23]==1:
+                crate_count+=1
+        if old_state[0][12]==1:
             crate_count+=1
             if old_state[0][11]==1:
                 crate_count+=1
-        if old_state[0][13]==1:
+        if old_state[0][8]==1:
             crate_count+=1
-            if old_state[0][14]==1:
+            if old_state[0][3]==1:
                 crate_count+=1
-        if old_state[0][2]==1:
-            crate_count+=1
-            if old_state[0][7]==1:
-                crate_count+=1
-        if old_state[0][17]==1:
-            crate_count+=1
-            if old_state[0][22]==1:
-                crate_count+=1
-        if crate_count == 0:
+        if crate_count==0:
             events.append(USELESS_BOMB)
-        if crate_count >= 1 and crate_count <= 2:
+        if crate_count==1:
             events.append(GOOD_BOMB)
-        if crate_count >= 3:
+        if crate_count>=2:
             events.append(VERY_GOOD_BOMB)
-        
-    
+                
     return events
 
 
@@ -469,13 +458,9 @@ def reward_from_events(self, events: List[str], old_game_state, new_game_state) 
         e.COIN_COLLECTED: 1,
         e.KILLED_OPPONENT: 5,
         e.WAITED: -0.001,
-        e.CRATE_DESTROYED: 0.1,
         STEP_TOWARD_BFS_COIN: 1/(coin_dist),
         COIN_DIST_INCREASED: -1/(coin_dist),
-        STEP_TOWARD_BFS_CRATE: 0.5/(coin_dist),
-        CRATE_DIST_INCREASED: -0.5/(coin_dist),
         TAKEN_DANGEROUS_ACTION: -10,
-        TAKEN_SAFE_ACTION: 0.01,
         USELESS_BOMB: -2,
         GOOD_BOMB: 2,
         VERY_GOOD_BOMB: 4
