@@ -1,29 +1,44 @@
 import pickle
 import numpy as np
-from .callbacks import ACTIONS, state_to_features, get_valid_actions, get_bomb_radius, is_safe_position, get_symmetric_states_and_actions
+from .callbacks import ACTIONS, state_to_features, get_valid_actions, get_bomb_radius, is_safe_position, get_next_target, bfs_distance
 import events as e
 from random import choice
 from collections import deque
-# Importieren der notwendigen Funktionen aus callbacks, um Duplikate zu vermeiden
-from .callbacks import get_next_target, look_for_targets, is_safe_position, get_bomb_radius, apply_transformation, get_symmetric_states_and_actions
 
 def setup_training(self):
     """
-    Initialize self for training purposes.
+    Initialise self for training purpose.
+
+    This is called after `setup` in callbacks.py.
+
+    :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     self.alpha = 0.2  # Learning rate
     self.gamma = 0.95  # Discount factor
-    self.epsilon = 1.0  # Starting epsilon for exploration
+    self.epsilon = 0.5 # Starting epsilon for exploration
     self.epsilon_decay = 0.995  # Epsilon decay rate
     self.epsilon_min = 0.25  # Minimum epsilon
     self.target = None
     self.steps_since_last_bomb = 0
-    self.last_positions = deque(maxlen=4)  # Speichern der letzten 4 Positionen zur Schleifenerkennung
+    self.last_positions = deque(maxlen=4) 
     self.last_two_actions = deque(['WAIT', 'WAIT'], maxlen=2)  # Initialisiere mit 'WAIT'
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: list):
     """
-    Update Q-values based on the events that occurred.
+    Called once per step to allow intermediate rewards based on game events.
+
+    When this method is called, self.events will contain a list of all game
+    events relevant to your agent that occurred during the previous step. Consult
+    settings.py to see what events are tracked. You can hand out rewards to your
+    agent based on these events and your knowledge of the (new) game state.
+
+    This is *one* of the places where you could update your agent.
+
+    :param self: This object is passed to all callbacks and you can set arbitrary values.
+    :param old_game_state: The state that was passed to the last call of `act`.
+    :param self_action: The action that you took.
+    :param new_game_state: The state the agent is in now.
+    :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
     if old_game_state is None or new_game_state is None:
         return
@@ -54,10 +69,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if bomb_in_radius:
         self.target = find_next_safe_position(new_game_state)
     else:
-        # Normal target selection (coins or crates)
         self.target = get_next_target(new_game_state)
-
-    # --- Compute additional events based on game state transitions ---
 
     # Update last positions
     new_position = new_game_state['self'][3]
@@ -102,8 +114,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         if opponent_nearby:
             events.append("BOMB_PLACED_NEAR_OPPONENT")
 
-    # --- End of additional events computation ---
-
     # Compute reward
     reward = reward_from_events(self, events)
 
@@ -143,7 +153,16 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: list):
     """
-    Called at the end of each game to finalize training.
+    Called at the end of each game or when the agent died to hand out final rewards.
+    This replaces game_events_occurred in this round.
+
+    This is similar to game_events_occurred. self.events will contain all events that
+    occurred during your agent's final step.
+
+    This is *one* of the places where you could update your agent.
+    This is also a good place to store an agent that you updated.
+
+    :param self: The same object that is passed to all of your callbacks.
     """
     last_state = state_to_features(self, last_game_state)
     if last_state not in self.q_table:
@@ -163,7 +182,10 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: list):
 
 def reward_from_events(self, events: list) -> float:
     """
-    Compute the reward based on events.
+    *This is not a required function, but an idea to structure your code.*
+
+    Here you can modify the rewards your agent get so as to en/discourage
+    certain behavior.
     """
     game_rewards = {
         e.COIN_COLLECTED: 10.0,
@@ -178,7 +200,7 @@ def reward_from_events(self, events: list) -> float:
         "MOVED_AWAY_FROM_TARGET": -5.0,
         "MOVED_INTO_DANGER": -20.0,
         "AVOIDED_DANGER": 10.0,
-        "REVISITED_POSITION": -10.0,  # Bestrafung für das Zurückkehren zu einer vorherigen Position
+        "REVISITED_POSITION": -10.0,  
         "WAITED": -5.0
     }
 
@@ -188,7 +210,7 @@ def reward_from_events(self, events: list) -> float:
 
 def find_next_safe_position(game_state):
     """
-    Finde die nächste sichere Position für den Agenten, wenn eine Bombe in der Nähe ist.
+    Find the next safe position for the agent when a bomb is nearby.
     """
     x, y = game_state['self'][3]
     arena = game_state['field']
@@ -201,8 +223,6 @@ def find_next_safe_position(game_state):
         affected_tiles = get_bomb_radius((bx, by), arena)
         unsafe_tiles.update(affected_tiles)
 
-    # BFS, um die nächste sichere Position zu finden
-    from collections import deque
     queue = deque()
     visited = set()
     queue.append(((x, y), 0))
@@ -218,30 +238,68 @@ def find_next_safe_position(game_state):
                     arena[nx, ny] == 0 and (nx, ny) not in visited):
                 queue.append(((nx, ny), dist + 1))
                 visited.add((nx, ny))
-    return (x, y)  # Keine sichere Position gefunden; aktuelle Position zurückgeben
+    return (x, y) 
 
-def bfs_distance(arena, start, target):
-    """
-    Berechnet die kürzeste Pfaddistanz von Start zu Ziel mittels BFS.
-    """
-    if start == target:
-        return 0
-    from collections import deque
-    queue = deque()
-    visited = set()
-    queue.append((start, 0))
-    visited.add(start)
 
-    while queue:
-        position, distance = queue.popleft()
-        x, y = position
-        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            nx, ny = x + dx, y + dy
-            if (0 <= nx < arena.shape[0] and 0 <= ny < arena.shape[1] and
-                    arena[nx, ny] == 0 and (nx, ny) not in visited):
-                if (nx, ny) == target:
-                    return distance + 1
-                queue.append(((nx, ny), distance + 1))
-                visited.add((nx, ny))
-    return float('inf')  # Wenn das Ziel nicht erreichbar ist
+def apply_transformation(state, action, rotation=0, axis=None):
+    """Apply rotation or mirror to both state and action."""
+    # Annahme: Die Umgebung ist jetzt ein 5x5 Gitter
+    surroundings = np.array(state[:-4]).reshape((5, 5))
+    dx, dy = state[-4], state[-3]
+    last_actions = state[-2:]  # Letzte zwei Aktionen
+    action_idx = ACTIONS.index(action) if action in ACTIONS else None
 
+    # Rotation der Umgebung und Aktion
+    if rotation:
+        k = rotation // 90
+        surroundings = np.rot90(surroundings, k=k)
+        if action_idx is not None and action in ['UP', 'RIGHT', 'DOWN', 'LEFT']:
+            action_idx = (action_idx + k) % 4  # Aktion rotieren
+
+    # Spiegelung der Umgebung und Aktion
+    if axis == 'x':
+        surroundings = np.flipud(surroundings)
+        if action == 'UP':
+            action_idx = ACTIONS.index('DOWN')
+        elif action == 'DOWN':
+            action_idx = ACTIONS.index('UP')
+    elif axis == 'y':
+        surroundings = np.fliplr(surroundings)
+        if action == 'LEFT':
+            action_idx = ACTIONS.index('RIGHT')
+        elif action == 'RIGHT':
+            action_idx = ACTIONS.index('LEFT')
+
+    # Transformation von dx, dy
+    if rotation:
+        angle = np.deg2rad(rotation)
+        cos_theta = int(np.cos(angle))
+        sin_theta = int(np.sin(angle))
+        dx_new = cos_theta * dx - sin_theta * dy
+        dy_new = sin_theta * dx + cos_theta * dy
+        dx, dy = dx_new, dy_new
+    if axis == 'x':
+        dy = -dy
+    elif axis == 'y':
+        dx = -dx
+
+    transformed_state = tuple(surroundings.flatten()) + (dx, dy) + last_actions
+    transformed_action = ACTIONS[action_idx] if action_idx is not None else action
+
+    return transformed_state, transformed_action
+
+def get_symmetric_states_and_actions(state, action):
+    """Generiere alle eindeutigen symmetrischen Zustände und entsprechende Aktionen."""
+    transformations = set()
+
+    # Rotationen
+    for rotation in [0, 90, 180, 270]:
+        transformed_state, transformed_action = apply_transformation(state, action, rotation=rotation)
+        transformations.add((transformed_state, transformed_action))
+
+    # Spiegelungen
+    for axis in ['x', 'y']:
+        transformed_state, transformed_action = apply_transformation(state, action, axis=axis)
+        transformations.add((transformed_state, transformed_action))
+
+    return list(transformations)

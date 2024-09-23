@@ -10,6 +10,16 @@ ACTION_TO_INDEX = {action: idx for idx, action in enumerate(ACTIONS)}
 def setup(self):
     """
     Setup your code. This is called once when loading each agent.
+    Make sure that you prepare everything such that act(...) can be called.
+
+    When in training mode, the separate `setup_training` in train.py is called
+    after this method. This separation allows you to share your trained agent
+    with other students, without revealing your training code.
+
+    In this example, our model is a set of probabilities over actions
+    that are is independent of the game state.
+
+    :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     # Load the Q-table if it exists
     if os.path.isfile("my-sarsa-model.pt"):
@@ -22,12 +32,17 @@ def setup(self):
         self.logger.info("No saved model found. Starting with an empty Q-table.")
     
     self.steps_since_last_bomb = 0
-    self.epsilon = 0.1  # Epsilon for epsilon-greedy strategy during action selection
-    self.last_two_actions = deque(['WAIT', 'WAIT'], maxlen=2)  # Initialize with 'WAIT'
+    self.epsilon = 0.05  # Epsilon for epsilon-greedy strategy during action selection
+    self.last_two_actions = deque(['WAIT', 'WAIT'], maxlen=2)  # Initialize with 'WAIT' - for prevention of wobbeling
 
 def act(self, game_state: dict) -> str:
     """
-    Decide on an action based on the current game state.
+    Your agent should parse the input, think, and take a decision.
+    When not in training mode, the maximum execution time for this method is 0.5s.
+
+    :param self: The same object that is passed to all of your callbacks.
+    :param game_state: The dictionary that describes everything on the board.
+    :return: The action to take as a string.
     """
     features = state_to_features(self, game_state)
     state = features
@@ -39,7 +54,7 @@ def act(self, game_state: dict) -> str:
 
     valid_actions = get_valid_actions(game_state, self)
 
-    # Epsilon-greedy action selection
+    # Epsilon-greedy
     if random() < self.epsilon:
         action = choice(valid_actions)
     else:
@@ -63,7 +78,17 @@ def act(self, game_state: dict) -> str:
 
 def state_to_features(self, game_state):
     """
-    Wandelt den Spielzustand in einen Zustandsvektor für die Q-Tabelle um.
+    *This is not a required function, but an idea to structure your code.*
+
+    Converts the game state to the input of your model, i.e.
+    a feature vector.
+
+    You can find out about the state of the game environment via game_state,
+    which is a dictionary. Consult 'get_state_for_agent' in environment.py to see
+    what it contains.
+
+    :param game_state:  A dictionary describing the current game board.
+    :return: np.array
     """
     if game_state is None:
         return None
@@ -71,7 +96,7 @@ def state_to_features(self, game_state):
     field = game_state['field']
     x, y = game_state['self'][3]
 
-    # Umgebung extrahieren (5x5 Gitter)
+    # 5x5 surrounding
     radius = 2
     x_min = max(0, x - radius)
     x_max = min(field.shape[0], x + radius + 1)
@@ -80,21 +105,21 @@ def state_to_features(self, game_state):
 
     surroundings = field[x_min:x_max, y_min:y_max]
 
-    # Padding, falls am Rand
+    # Padding, if at the edge
     pad_width_x = (radius - (x - x_min), radius - (x_max - x - 1))
     pad_width_y = (radius - (y - y_min), radius - (y_max - y - 1))
     surroundings = np.pad(surroundings, (pad_width_x, pad_width_y), 'constant', constant_values=-1)
 
     surroundings = tuple(surroundings.flatten())
 
-    # Relative Position zum aktuellen Ziel
+    # Relative position to the current target
     target = get_next_target(game_state)
     if target:
         dx, dy = target[0] - x, target[1] - y
     else:
         dx, dy = 0, 0
 
-    # Inklusion der letzten zwei Aktionen
+    # add last two steps
     last_actions_indices = [ACTION_TO_INDEX[action] for action in self.last_two_actions]
 
     features = surroundings + (dx, dy) + tuple(last_actions_indices)
@@ -102,7 +127,7 @@ def state_to_features(self, game_state):
 
 def get_valid_actions(game_state, self):
     """
-    Gibt die Liste der gültigen Aktionen von der aktuellen Position zurück.
+    Returns the list of valid actions from the current position.
     """
     arena = game_state['field']
     x, y = game_state['self'][3]
@@ -124,24 +149,34 @@ def get_valid_actions(game_state, self):
                 (nx, ny) not in others):
             valid_actions.append(action_map[(dx, dy)])
 
+    can_place_bomb = True
+    radius = 2  # 5x5 
 
-    # 'BOMB' hinzufügen, wenn Bedingungen erfüllt sind
-    if self.steps_since_last_bomb >= 3:
+    # Check for bombs or explosions in the 5x5 field
+    for i in range(x - radius, x + radius + 1):
+        for j in range(y - radius, y + radius + 1):
+            if (0 <= i < arena.shape[0] and 0 <= j < arena.shape[1]):
+                if explosion_map[i, j] > 0:
+                    can_place_bomb = False
+                if (i, j) in bomb_positions:
+                    can_place_bomb = False
+
+    if can_place_bomb:
         valid_actions.append('BOMB')
     
-    # 'WAIT' nur hinzufügen, wenn keine anderen Aktionen verfügbar sind
+    if self.last_two_actions[-1] != 'BOMB' and not can_place_bomb:
+        valid_actions.append('WAIT')
+    
+
+    # Only add 'WAIT' if no other actions are available
     if not valid_actions:
         valid_actions.append('WAIT')
 
     return valid_actions
 
-# Importieren der notwendigen Funktionen aus train.py, um Duplikate zu vermeiden
-# Stellen Sie sicher, dass keine unnötigen Funktionen vorhanden sind
 
 def get_next_target(game_state):
-    """
-    Bestimmt das nächste Ziel für den Agenten basierend auf den Prioritäten.
-    """
+
     x, y = game_state['self'][3]
     field = game_state['field']
     bombs = game_state['bombs']
@@ -149,7 +184,6 @@ def get_next_target(game_state):
     others = [other[3] for other in game_state['others']]
     free_space = field == 0
 
-    # Prüfen, ob der Agent in Gefahr ist
     in_danger = False
     for (bx, by), timer in bombs:
         if (x, y) in get_bomb_radius((bx, by), field):
@@ -157,7 +191,7 @@ def get_next_target(game_state):
             break
 
     if in_danger:
-        # 1. Nächsten sicheren Platz finden
+        # 1. Find next safe position 
         safe_positions = []
         for i in range(field.shape[0]):
             for j in range(field.shape[1]):
@@ -167,7 +201,7 @@ def get_next_target(game_state):
         if target:
             return target
 
-    # 2. Sicherer Bombenplatz, der eine Kiste zerstört
+    # 2. save place to place bomb which destroys create
     crates = np.argwhere(field == 1)
     bomb_positions = []
     for crate in crates:
@@ -181,14 +215,14 @@ def get_next_target(game_state):
     if target:
         return target
 
-    # 3. Nächste Münze finden
+    # 3. Find a coin
     coins = game_state['coins']
     if coins:
         target = look_for_targets(free_space, (x, y), coins)
         if target:
             return target
 
-    # 4. Gegnerischer Agent
+    # 4. find an enemy
     if others:
         target = look_for_targets(free_space, (x, y), others)
         if target:
@@ -197,7 +231,7 @@ def get_next_target(game_state):
     return None
 
 def look_for_targets(free_space, start, targets, logger=None):
-    """Finde die Richtung zum nächsten Ziel, das über freie Felder erreichbar ist."""
+    """Find the direction to the next target that can be reached."""
     if len(targets) == 0:
         return None
 
@@ -209,13 +243,13 @@ def look_for_targets(free_space, start, targets, logger=None):
 
     while len(frontier) > 0:
         current = frontier.pop(0)
-        # Abstand zu den Zielen berechnen
+        # calculations of distance to targets
+        #d=bfs_distance(targets, current)
         d = np.sum(np.abs(np.subtract(targets, current)), axis=1).min()
         if d + dist_so_far[current] <= best_dist:
             best = current
             best_dist = d + dist_so_far[current]
         if d == 0:
-            # Ziel gefunden
             best = current
             break
         x, y = current
@@ -226,16 +260,13 @@ def look_for_targets(free_space, start, targets, logger=None):
                 frontier.append(neighbor)
                 parent_dict[neighbor] = current
                 dist_so_far[neighbor] = dist_so_far[current] + 1
-    # Ersten Schritt zum Ziel finden
+    # Find first step to target
     current = best
     while parent_dict[current] != start:
         current = parent_dict[current]
     return current
 
 def is_safe_position(game_state, position, bombs):
-    """
-    Überprüft, ob eine Position sicher ist, unter Berücksichtigung von Bomben und deren Explosionsradius.
-    """
     x, y = position
     arena = game_state['field']
     explosion_map = game_state['explosion_map']
@@ -249,9 +280,6 @@ def is_safe_position(game_state, position, bombs):
     return True
 
 def get_bomb_radius(bomb_pos, arena):
-    """
-    Gibt die von der Bombe betroffenen Felder zurück, unter Berücksichtigung von Wänden und Kisten.
-    """
     x_bomb, y_bomb = bomb_pos
     radius = [(x_bomb, y_bomb)]  # Include bomb position itself
 
@@ -269,66 +297,29 @@ def get_bomb_radius(bomb_pos, arena):
                 break
     return radius
 
-# Ihre Symmetrie-Funktionen bleiben unverändert
-def apply_transformation(state, action, rotation=0, axis=None):
-    """Apply rotation or mirror to both state and action."""
-    # Annahme: Die Umgebung ist jetzt ein 5x5 Gitter
-    surroundings = np.array(state[:-4]).reshape((5, 5))
-    dx, dy = state[-4], state[-3]
-    last_actions = state[-2:]  # Letzte zwei Aktionen
-    action_idx = ACTIONS.index(action) if action in ACTIONS else None
 
-    # Rotation der Umgebung und Aktion
-    if rotation:
-        k = rotation // 90
-        surroundings = np.rot90(surroundings, k=k)
-        if action_idx is not None and action in ['UP', 'RIGHT', 'DOWN', 'LEFT']:
-            action_idx = (action_idx + k) % 4  # Aktion rotieren
+def bfs_distance(arena, start, target):
+    """
+    Breadth-first search (BFS): calculates the shortest path distance from a starting point to a target on a game board
+    """
+    if start == target:
+        return 0
+    from collections import deque
+    queue = deque()
+    visited = set()
+    queue.append((start, 0))
+    visited.add(start)
 
-    # Spiegelung der Umgebung und Aktion
-    if axis == 'x':
-        surroundings = np.flipud(surroundings)
-        if action == 'UP':
-            action_idx = ACTIONS.index('DOWN')
-        elif action == 'DOWN':
-            action_idx = ACTIONS.index('UP')
-    elif axis == 'y':
-        surroundings = np.fliplr(surroundings)
-        if action == 'LEFT':
-            action_idx = ACTIONS.index('RIGHT')
-        elif action == 'RIGHT':
-            action_idx = ACTIONS.index('LEFT')
+    while queue:
+        position, distance = queue.popleft()
+        x, y = position
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = x + dx, y + dy
+            if (0 <= nx < arena.shape[0] and 0 <= ny < arena.shape[1] and
+                    arena[nx, ny] == 0 and (nx, ny) not in visited):
+                if (nx, ny) == target:
+                    return distance + 1
+                queue.append(((nx, ny), distance + 1))
+                visited.add((nx, ny))
+    return float('inf')
 
-    # Transformation von dx, dy
-    if rotation:
-        angle = np.deg2rad(rotation)
-        cos_theta = int(np.cos(angle))
-        sin_theta = int(np.sin(angle))
-        dx_new = cos_theta * dx - sin_theta * dy
-        dy_new = sin_theta * dx + cos_theta * dy
-        dx, dy = dx_new, dy_new
-    if axis == 'x':
-        dy = -dy
-    elif axis == 'y':
-        dx = -dx
-
-    transformed_state = tuple(surroundings.flatten()) + (dx, dy) + last_actions
-    transformed_action = ACTIONS[action_idx] if action_idx is not None else action
-
-    return transformed_state, transformed_action
-
-def get_symmetric_states_and_actions(state, action):
-    """Generiere alle eindeutigen symmetrischen Zustände und entsprechende Aktionen."""
-    transformations = set()
-
-    # Rotationen
-    for rotation in [0, 90, 180, 270]:
-        transformed_state, transformed_action = apply_transformation(state, action, rotation=rotation)
-        transformations.add((transformed_state, transformed_action))
-
-    # Spiegelungen
-    for axis in ['x', 'y']:
-        transformed_state, transformed_action = apply_transformation(state, action, axis=axis)
-        transformations.add((transformed_state, transformed_action))
-
-    return list(transformations)
