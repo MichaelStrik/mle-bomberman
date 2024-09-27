@@ -34,8 +34,8 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 # hyperparameters
 GAMMA = 0.6
 ALPHA = 0.3
-EPSILON = 0.5
-EPSILON_DECAY = 0.999
+EPSILON = 0.95
+EPSILON_DECAY = 0.9994
 ALPHA_DECAY = 1.0 # alpha is constant
 EPSILON_MIN = 0.1 # not in use
 
@@ -271,7 +271,7 @@ def update_q_table(self, old_state, self_action, new_state, reward):
     if new_state not in self.q_table:
         self.q_table[new_state] = np.zeros(len(ACTIONS))
 
-    # Update: SARSA
+    # Update: Q-learning
     if new_state is not None:
         next_action = np.argmax(self.q_table[new_state])
         self.q_table[old_state][action_idx] = \
@@ -313,7 +313,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     action_idx = ACTIONS.index(self_action)
 
     # Logger: write game events to logger
-    self.logger.debug(f'Event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    # self.logger.debug(f'Event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     # NOTE generalization from smaller fields can be implemented here
 
