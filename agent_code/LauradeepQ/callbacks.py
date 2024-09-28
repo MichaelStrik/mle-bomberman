@@ -54,7 +54,7 @@ def setup(self):
     self.epsilon_min = 0.1
 
     self.state_size=7 #number of features we derive from gamestate
-    self.memory_size=1000000
+    
 
      # Prüfen, ob eine gespeicherte Q-Tabelle vorhanden istcustom_objects={'mae': 'mae'
     if os.path.isfile('q_network_model.h5'):
@@ -69,8 +69,7 @@ def setup(self):
         self.target_model.set_weights(self.model.get_weights())
         self.logger.info("No saved model found.")
 
-    # Replay Memory
-    self.memory = deque(maxlen=self.memory_size)
+
 
 def act(self, game_state: dict) -> str:
     features = state_to_features(game_state)
