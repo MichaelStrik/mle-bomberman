@@ -19,14 +19,6 @@ import events as e
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
-# Q-Network
-def build_model(state_size, action_size):
-    model = tf.keras.Sequential()
-    model.add(kr.layers.Dense(24, input_dim=state_size, activation='relu'))
-    model.add(kr.layers.Dense(24, activation='relu'))
-    model.add(kr.layers.Dense(action_size, activation='linear'))
-    model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(learning_rate=0.5))
-    return model
 
 
 def setup_training(self):
@@ -39,13 +31,6 @@ def setup_training(self):
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     logging.getLogger('tensorflow').setLevel(logging.ERROR)
     self.logger.info("Setting up training variables.")
-    # Q-table initialisieren
-    #self.q_table = {}
-    self.alpha = 0.3  # Lernrate davor 0.1
-    self.gamma = 0.95  # Discountfaktor um so höher um so stätrker werden zufällige gewinne belohnt
-    self.epsilon = 1.0  # Epsilon für epsilon-greedy 
-    self.epsilon_decay = 0.995  # Epsilon-Decay für Exploration-Exploitation Tradeoff
-    self.epsilon_min = 0.1
 
     self.last_positions = []
     self.last_actions = []
@@ -54,19 +39,6 @@ def setup_training(self):
     self.memory_size=1000000
     self.batch_size = 64
 
-    # Prüfen, ob eine gespeicherte Q-Tabelle vorhanden ist
-    if os.path.isfile('q_network_model.h5'):
-        #with open('q_network_model.h5', "rb") as file:
-        self.model = tf.keras.models.load_model('q_network_model.h5',custom_objects={'mse': tf.keras.losses.MeanSquaredError()})
-        self.target_model=tf.keras.models.load_model('target_network_model.h5',custom_objects={'mse': tf.keras.losses.MeanSquaredError()})
-        self.model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(learning_rate=0.5))
-        self.logger.info("Loaded models")
-    else:
-        # Falls keine gespeicherte Q-Tabelle vorhanden ist, initialisieren wir sie leer.
-        self.model = build_model(self.state_size, len(ACTIONS))
-        self.target_model = build_model(self.state_size, len(ACTIONS))
-        self.target_model.set_weights(self.model.get_weights())
-        self.logger.info("No saved model found.")
 
     # Replay Memory
     self.memory = deque(maxlen=self.memory_size)
@@ -135,34 +107,17 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # Reward, jetzt mit alten und neuen Zuständen
     reward = reward_from_events(self, events, old_game_state, new_game_state)
 
-    # SARSA Update-Regel
-   # if new_game_state is not None:
-    #    next_action = np.argmax(self.q_table[new_state])
-     #   self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-      #                                        self.alpha * (reward + self.gamma * self.q_table[new_state][next_action] - self.q_table[old_state][action_idx])
-    #else:
-     #   self.q_table[old_state][action_idx] = self.q_table[old_state][action_idx] + \
-      #self.alpha * (reward - self.q_table[old_state][action_idx])
 
-#Muss im Training auch epsilon greedy angewendet werden?
-    if np.random.rand() <= self.epsilon:
-        #next_action = random.randrange(len(ACTIONS))    #hier auch valid_actions?
-        next_action = np.random.choice(valid_actions)
-    else:
-        q_values = self.model.predict(new_state)[0]
-        valid_q_values = [q_values[ACTIONS.index(next_action)] for next_action in valid_actions]
-        next_action = valid_actions[np.argmax(valid_q_values)]
-        #next_action = np.argmax(q_values)
         
-        self.memory.append((old_state, next_action, reward, new_state)) #done??
+    self.memory.append((old_state, next_action, reward, new_state)) #done??
         
-        if len(self.memory) > self.batch_size:
-            minibatch = random.sample(self.memory, self.batch_size)
-            for old_state, next_action, reward, new_state in minibatch:
-                target = reward + self.gamma * np.amax(self.target_model.predict(new_state)[0])
-                target_f = self.model.predict(old_state)   #q value is updated here
-                target_f[0][ACTIONS.index(next_action)] = target
-                self.model.fit(old_state, target_f, epochs=1, verbose=0)  #q network is trained here, modelfit performs gradient descent
+    if len(self.memory) > self.batch_size:
+        minibatch = random.sample(self.memory, self.batch_size)
+        for old_state, next_action, reward, new_state in minibatch:
+            target = reward + self.gamma * np.amax(self.target_model.predict(new_state)[0])
+            target_f = self.model.predict(old_state)   #q value is updated here
+            target_f[0][ACTIONS.index(next_action)] = target
+            self.model.fit(old_state, target_f, epochs=1, verbose=0)  #q network is trained here, modelfit performs gradient descent
             
     # Update Target Network
     if new_game_state['step'] % 10 == 0:
