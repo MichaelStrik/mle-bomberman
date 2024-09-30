@@ -21,10 +21,12 @@ def setup(self):
         self.q_table = {}
         self.logger.info("No saved model found. Starting with an empty Q-table.")
 
-    self.epsilon = 0.01  # Epsilon für die epsilon-greedy Strategie
-    self.alpha = 0.2    # Lernrate
-    self.gamma = 0.95   # Diskontierungsfaktor
+    self.epsilon = 0.1   # Epsilon für die epsilon-greedy Strategie
+    self.alpha = 0.2     # Lernrate
+    self.gamma = 0.95    # Diskontierungsfaktor
     self.target = None
+    self.evading_bomb = False  # Flag, um anzuzeigen, ob der Agent einer Bombe ausweicht
+    self.next_random = np.random.rand() 
 
 def act(self, game_state: dict) -> str:
     """
@@ -41,8 +43,9 @@ def act(self, game_state: dict) -> str:
 
     valid_actions = get_valid_actions(game_state)
 
+    random = self.next_random
     # Epsilon-greedy Aktionsauswahl
-    if np.random.rand() < self.epsilon:
+    if random < self.epsilon:
         action = choice(valid_actions)
     else:
         # Wähle die Aktion mit dem höchsten Q-Wert unter den gültigen Aktionen
@@ -52,7 +55,8 @@ def act(self, game_state: dict) -> str:
         best_actions = [valid_actions[i] for i, q in enumerate(valid_q_values) if q == max_q]
         action = choice(best_actions)
     
-    self.next_action = action
+    self.next_random = np.random.rand()
+    
     return action
 
 def state_to_features(self, game_state):
@@ -66,8 +70,13 @@ def state_to_features(self, game_state):
     own_position = game_state['self'][3]
     x, y = own_position
 
-    # Umgebung des Agenten (3x3 Gitter um den Agenten)
-    surroundings = tuple(field[x - 2:x + 3, y - 2:y + 3].flatten())
+    # Umgebung des Agenten (5x5 Gitter um den Agenten)
+    surroundings = field[x - 2:x + 3, y - 2:y + 3]
+    # Falls Rand erreicht wird, mit -1 (Wand) auffüllen
+    surroundings = np.pad(surroundings, pad_width=((max(0, 2 - x), max(0, x + 3 - field.shape[0])),
+                                                   (max(0, 2 - y), max(0, y + 3 - field.shape[1]))),
+                          mode='constant', constant_values=-1)
+    surroundings = tuple(surroundings.flatten())
 
     # Relative Position zum aktuellen Ziel
     if self.target is not None:
@@ -105,8 +114,6 @@ def get_valid_actions(game_state):
     # 'WAIT' erlauben, wenn es sicher ist
     if explosion_map[x, y] <= 0 and (x, y) not in bomb_positions:
         valid_actions.append('WAIT')
-
-
     valid_actions.append('BOMB')
 
     if not valid_actions:
@@ -146,66 +153,53 @@ def get_bomb_radius(bomb_pos, arena):
                 break
     return radius
 
-def is_safe_position(game_state, position, bombs):
+def is_safe_position(game_state, position):
     """
     Überprüft, ob eine Position sicher ist, unter Berücksichtigung von Bomben und deren Explosionsradius.
     """
     x, y = position
     arena = game_state['field']
+    bombs = game_state['bombs']
     explosion_map = game_state['explosion_map']
 
-    for (bx, by), timer in bombs:
-        if timer <= 0:
-            continue
+    # Überprüfe, ob die Position von aktuellen Explosionen betroffen ist
+    if explosion_map[x, y] > 0:
+        return False
+
+    # Überprüfe, ob die Position von tickenden Bomben bedroht ist
+    for (bx, by), _ in bombs:
         affected_tiles = get_bomb_radius((bx, by), arena)
         if (x, y) in affected_tiles:
             return False
     return True
 
-def get_next_target(game_state):
+def find_safe_position(game_state):
     """
-    Bestimmt das nächste Ziel für den Agenten (Münze oder Kiste).
+    Findet die nächste sichere Position, die nicht im Explosionsradius einer Bombe liegt.
     """
-    coins = game_state['coins']
-    if coins:
-        # Nächstgelegene Münze anvisieren
-        x, y = game_state['self'][3]
-        distances = [bfs_distance(game_state['field'], (x, y), coin) for coin in coins]
-        min_distance = min(distances)
-        min_index = distances.index(min_distance)
-        return coins[min_index]
-    else:
-        # Kisten suchen
-        crates = np.argwhere(game_state['field'] == 1)
-        if len(crates) > 0:
-            x, y = game_state['self'][3]
-            distances = [bfs_distance(game_state['field'], (x, y), tuple(crate)) for crate in crates]
-            min_distance = min(distances)
-            min_index = distances.index(min_distance)
-            return tuple(crates[min_index])
-    return None  # Kein Ziel gefunden
-
-def bfs_distance(arena, start, target):
-    """
-    Berechnet die kürzeste Pfaddistanz von Start zu Ziel mittels BFS.
-    """
-    if start == target:
-        return 0
     from collections import deque
+
+    arena = game_state['field']
+    x, y = game_state['self'][3]
+    bombs = game_state['bombs']
+    explosion_map = game_state['explosion_map']
+    others = [other[3] for other in game_state['others']]
+
     queue = deque()
     visited = set()
-    queue.append((start, 0))
-    visited.add(start)
+    queue.append((x, y))
+    visited.add((x, y))
 
     while queue:
-        position, distance = queue.popleft()
-        x, y = position
-        for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
-            nx, ny = x + dx, y + dy
+        cx, cy = queue.popleft()
+        if is_safe_position(game_state, (cx, cy)):
+            return (cx, cy)
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = cx + dx, cy + dy
             if (0 <= nx < arena.shape[0] and 0 <= ny < arena.shape[1] and
-                    arena[nx, ny] == 0 and (nx, ny) not in visited):
-                if (nx, ny) == target:
-                    return distance + 1
-                queue.append(((nx, ny), distance + 1))
+                    (nx, ny) not in visited and arena[nx, ny] == 0 and
+                    (nx, ny) not in others):
+                queue.append((nx, ny))
                 visited.add((nx, ny))
-    return float('inf')  # Wenn das Ziel nicht erreichbar ist
+    # Falls keine sichere Position gefunden wurde, bleibt der Agent stehen
+    return (x, y)

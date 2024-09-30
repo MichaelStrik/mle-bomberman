@@ -2,16 +2,15 @@ import pickle
 import numpy as np
 import events as e
 from random import choice
-from collections import deque
-from .callbacks import ACTIONS, ACTION_TO_INDEX, state_to_features, is_crate_in_bomb_range,  get_valid_actions, get_bomb_radius, bfs_distance
+from .callbacks import ACTIONS, ACTION_TO_INDEX, is_safe_position, state_to_features, is_crate_in_bomb_range, get_valid_actions, get_bomb_radius, find_safe_position
 
 def setup_training(self):
     """
     Initialisiert die Trainingsparameter.
     """
-    self.alpha = 0.1  # Lernrate
-    self.gamma = 0.1  # Diskontierungsfaktor
-    self.epsilon = 0.3  # Epsilon für Exploration
+    self.alpha = 0.2  # Lernrate
+    self.gamma = 0.95  # Diskontierungsfaktor
+    self.epsilon = 0.1  # Epsilon für Exploration
 
     self.target = None
     self.evading_bomb = False  # Flag, um anzuzeigen, ob der Agent einer Bombe ausweicht
@@ -37,45 +36,60 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     action_idx = ACTION_TO_INDEX[self_action]
 
-    # Überprüfen, ob die letzte Aktion eine Bombe war
-    if self_action == 'BOMB':
-        # Nächstes Ziel ist ein sicherer Ort
-        self.evading_bomb = True
-        self.target = find_safe_location(new_game_state)
-    elif self.evading_bomb:
-        # Prüfen, ob die Bombe nicht mehr gefährlich ist
-        if is_bomb_danger_over(self, new_game_state):
+    # Aktualisieren des Ziels
+    if self.evading_bomb:
+        # Prüfen, ob die Bombengefahr vorbei ist
+        if is_safe_position(new_game_state, new_game_state['self'][3]):
             self.evading_bomb = False
-            # Nächstes Ziel bestimmen
-            self.target = get_next_target(self, new_game_state)
-        else:
-            # Weiterhin zum sicheren Ort bewegen
-            pass  # self.target bleibt gleich
+            self.target = get_next_target(new_game_state)
     else:
-        # Normales Ziel bestimmen
-        self.target = get_next_target(self, new_game_state)
+        # Überprüfen, ob der Agent im Explosionsradius einer Bombe ist
+        if not is_safe_position(new_game_state, new_game_state['self'][3]):
+            self.evading_bomb = True
+            self.target = find_safe_position(new_game_state)
+        else:
+            self.target = get_next_target(new_game_state)
 
     # Zusätzliche Ereignisse basierend auf dem Zustandsübergang
     new_position = new_game_state['self'][3]
     old_position = old_game_state['self'][3]
     if self.target is not None:
-        old_distance = bfs_distance(old_game_state['field'], old_position, self.target)
-        new_distance = bfs_distance(new_game_state['field'], new_position, self.target)
+        old_distance = manhattan_distance(old_position, self.target)
+        new_distance = manhattan_distance(new_position, self.target)
         if new_distance < old_distance:
             events.append("MOVED_TOWARDS_TARGET")
         elif new_distance > old_distance:
             events.append("MOVED_AWAY_FROM_TARGET")
 
     # Bombe in der Nähe einer Kiste platziert
-    if self_action == 'BOMB' and is_crate_in_bomb_range(old_game_state):
-        events.append("BOMB_PLACED_NEAR_CRATE")
+    if self_action == 'BOMB':
+        if is_crate_in_bomb_range(old_game_state) and is_safe_position(new_game_state, new_position):
+            events.append("BOMB_PLACED_NEAR_CRATE")
+        else:
+            events.append("UNSAFE_BOMB_PLACED")
 
     # Belohnung berechnen
     reward = reward_from_events(self, events)
 
-    # SARSA-Update
+    # next action
+    old_valid_actions = get_valid_actions(old_game_state)
+    random = self.next_random
+    old_q_values = self.q_table[old_state]
+    if random < self.epsilon:
+        next_action = choice(old_valid_actions)
+    else:
+        # Wähle die Aktion mit dem höchsten Q-Wert unter den gültigen Aktionen
+        valid_q_indices = [ACTION_TO_INDEX[a] for a in old_valid_actions]
+        valid_q_values = old_q_values[valid_q_indices]
+        max_q = np.max(valid_q_values)
+        best_actions = [old_valid_actions[i] for i, q in enumerate(valid_q_values) if q == max_q]
+        next_action = choice(best_actions)
+    
+
+    # SARSA-Update mit der tatsächlich ausgeführten nächsten Aktion
+    next_action_idx = ACTION_TO_INDEX[next_action] 
     self.q_table[old_state][action_idx] += self.alpha * (
-        reward + self.gamma * np.max(self.q_table[new_state]) - self.q_table[old_state][action_idx]
+        reward + self.gamma * self.q_table[new_state][next_action_idx] - self.q_table[old_state][action_idx]
     )
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: list):
@@ -102,134 +116,82 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: list):
     self.logger.info("Q-table saved to my-sarsa-model.pt.")
 
 def reward_from_events(self, events: list) -> float:
+    """
+    Berechnet die Belohnung basierend auf den aufgetretenen Ereignissen.
+    """
     game_rewards = {
-        e.COIN_COLLECTED: 50.0,
-        e.KILLED_OPPONENT: 100.0,
-        e.INVALID_ACTION: -10.0,
-        e.GOT_KILLED: -100.0,
-        e.KILLED_SELF: -200.0,
         "MOVED_TOWARDS_TARGET": 10.0,
         "MOVED_AWAY_FROM_TARGET": -10.0,
-        "BOMB_PLACED_NEAR_CRATE": 5.0,
-        e.WAITED: -0.5,
+        "BOMB_PLACED_NEAR_CRATE": 15.0,
+        "UNSAFE_BOMB_PLACED": -20.0,
+        e.WAITED: -1.0
     }
 
     reward_sum = sum([game_rewards.get(event, 0) for event in events])
 
     return reward_sum
 
-def is_bomb_danger_over(self, game_state):
-    """
-    Überprüft, ob die Bombengefahr vorüber ist (d.h., ob es keine aktiven Explosionen oder tickenden Bomben gibt).
-    """
-    # Wenn es keine tickenden Bomben oder Explosionen mehr gibt, ist die Gefahr vorüber
-    if len(game_state['bombs']) == 0 and np.all(game_state['explosion_map'] == 0):
-        return True
-    else:
-        return False
-
-def find_safe_location(game_state):
-    """
-    Findet die nächste sichere Position, die nicht im Explosionsradius einer Bombe liegt.
-    Wände und Kisten blockieren die Explosion.
-    """
-    field = game_state['field']
-    own_position = game_state['self'][3]
-    bombs = game_state['bombs']
-    explosion_map = game_state['explosion_map']
-
-    # Positionen markieren, die gefährlich sind
-    dangerous_tiles = set()
-    for bomb_pos, bomb_timer in bombs:
-        bomb_radius = get_bomb_radius( bomb_pos, field)
-        dangerous_tiles.update(bomb_radius)
-
-    # Aktuelle Explosionen hinzufügen
-    x_max, y_max = field.shape
-    for x in range(x_max):
-        for y in range(y_max):
-            if explosion_map[x, y] > 0:
-                dangerous_tiles.add((x, y))
-
-    # BFS, um die nächste sichere Position zu finden
-    queue = deque()
-    queue.append((own_position, 0))
-    visited = set()
-    visited.add(own_position)
-
-    while queue:
-        current_pos, distance = queue.popleft()
-        if current_pos not in dangerous_tiles:
-            return current_pos  # Sichere Position gefunden
-
-        x, y = current_pos
-        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            next_pos = (x + dx, y + dy)
-            if (0 <= next_pos[0] < x_max) and (0 <= next_pos[1] < y_max):
-                if is_free(field[next_pos]) and next_pos not in visited:
-                    queue.append((next_pos, distance + 1))
-                    visited.add(next_pos)
-
-    # Keine sichere Position gefunden, am aktuellen Ort bleiben
-    return own_position
-
-def get_next_target(self, game_state):
+def get_next_target(game_state):
     """
     Bestimmt das nächste Ziel für den Agenten.
     - Wenn es Münzen gibt, gehe zur nächsten Münze.
-    - Wenn es Kisten gibt, gehe zu einer Kiste, wo es sicher ist, eine Bombe zu platzieren.
+    - Wenn es Kisten gibt, die sicher zerstört werden können, gehe zu einer solchen Kiste.
     - Ansonsten None.
     """
     field = game_state['field']
     coins = game_state['coins']
     own_position = game_state['self'][3]
-    others = [agent[3] for agent in game_state['others']]
 
     # Wenn es Münzen gibt, gehe zur nächsten
     if len(coins) > 0:
-        coin_distances = []
-        for coin in coins:
-            distance = bfs_distance(field, own_position, coin)
-            if distance is not None:
-                coin_distances.append((distance, coin))
-        if coin_distances:
-            coin_distances.sort()
-            return coin_distances[0][1]
+        distances = [manhattan_distance(own_position, coin) for coin in coins]
+        min_distance = min(distances)
+        min_index = distances.index(min_distance)
+        return coins[min_index]
 
-    # Wenn es Kisten gibt, gehe zu einer sicheren Kiste
+    # Wenn es Kisten gibt, die sicher erreicht werden können
     crates = np.argwhere(field == 1)
-    if len(crates) > 0:
-        safe_crate_positions = []
-        for crate in crates:
-            crate_pos = tuple(crate)
-            if is_safe_to_place_bomb(field, own_position, crate_pos, others):
-                distance = bfs_distance(field, own_position, crate_pos)
-                if distance is not None:
-                    safe_crate_positions.append((distance, crate_pos))
-        if safe_crate_positions:
-            safe_crate_positions.sort()
-            return safe_crate_positions[0][1]
+    safe_crates = []
+    for crate in crates:
+        crate_pos = tuple(crate)
+        if is_reachable(game_state, own_position, crate_pos):
+            safe_crates.append(crate_pos)
+    if safe_crates:
+        distances = [manhattan_distance(own_position, crate) for crate in safe_crates]
+        min_distance = min(distances)
+        min_index = distances.index(min_distance)
+        return safe_crates[min_index]
 
     # Kein Ziel gefunden
     return None
 
-def is_safe_to_place_bomb(field, own_position, crate_position, others):
+def is_reachable(game_state, start, target):
     """
-    Überprüft, ob es sicher ist, an der gegebenen Kistenposition eine Bombe zu platzieren.
+    Überprüft, ob das Ziel von der Startposition aus erreichbar ist.
     """
-    x, y = crate_position
-    x_max, y_max = field.shape
-    safe_spot_found = False
-    for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-        next_pos = (x + dx, y + dy)
-        if (0 <= next_pos[0] < x_max) and (0 <= next_pos[1] < y_max):
-            if is_free(field[next_pos]) and next_pos != own_position and next_pos not in others:
-                safe_spot_found = True
-                break
-    return safe_spot_found
+    from collections import deque
 
-def is_free(tile):
+    arena = game_state['field']
+    x_max, y_max = arena.shape
+    queue = deque()
+    visited = set()
+    queue.append(start)
+    visited.add(start)
+
+    while queue:
+        x, y = queue.popleft()
+        if (x, y) == target:
+            return True
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = x + dx, y + dy
+            if (0 <= nx < x_max and 0 <= ny < y_max and
+                    arena[nx, ny] == 0 and (nx, ny) not in visited):
+                queue.append((nx, ny))
+                visited.add((nx, ny))
+    return False
+
+def manhattan_distance(a, b):
     """
-    Überprüft, ob ein Feld frei begehbar ist.
+    Berechnet die Manhattan-Distanz zwischen zwei Punkten.
     """
-    return tile == 0  # 0: frei, -1: Wand, 1: Kiste
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
