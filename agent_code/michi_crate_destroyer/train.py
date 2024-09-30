@@ -35,7 +35,7 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 GAMMA = 0.6
 ALPHA = 0.3
 EPSILON = 0.95
-EPSILON_DECAY = 0.9994
+EPSILON_DECAY = 0.9993
 ALPHA_DECAY = 1.0 # alpha is constant
 EPSILON_MIN = 0.1 # not in use
 

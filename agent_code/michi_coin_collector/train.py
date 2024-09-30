@@ -40,7 +40,7 @@ VEC_TO_DIR = {
 
 GAMMA = 0.6
 ALPHA = 0.3
-EPSILON = 0.4
+EPSILON = 0.5
 EPSILON_DECAY = 0.995
 ALPHA_DECAY = 1.0#0.995
 EPSILON_MIN = 0.1
@@ -313,7 +313,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     action_idx = ACTIONS.index(self_action)
 
     # Logger: write game events to logger
-    self.logger.debug(f'Event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    # self.logger.debug(f'Event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     # NOTE generalization from smaller fields can be implemented here
 
